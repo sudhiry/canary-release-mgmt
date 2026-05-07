@@ -18,3 +18,6 @@ kubectl config use-context "kind-${KIND_CLUSTER_NAME}"
 kubectl cluster-info
 
 echo "==> Cluster ready"
+
+echo "==> Installing Istio"
+bash "${SCRIPT_DIR}/istio/install.sh"
