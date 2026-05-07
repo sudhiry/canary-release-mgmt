@@ -1,0 +1,15 @@
+# deploy/kind/cluster-config.yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: canary-release-mgmt
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # Istio ingress gateway HTTP
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+      # Restate ingress (for invoking handlers from outside the cluster, dev only)
+      - containerPort: 30090
+        hostPort: 9070
+        protocol: TCP
