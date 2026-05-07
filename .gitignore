@@ -1,0 +1,40 @@
+# Java / Spring Boot
+target/
+build/
+*.jar
+*.class
+.gradle/
+.mvn/
+.classpath
+.project
+.settings/
+
+# Node / TypeScript
+node_modules/
+dist/
+*.tsbuildinfo
+.npm/
+.pnpm-store/
+coverage/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.swp
+.DS_Store
+
+# Kubernetes / Helm
+charts/*.tgz
+*.kubeconfig
+
+# canary-ctl local state
+.canary-ctl/
+
+# Logs and runtime
+*.log
+*.pid
+
+# Environment files
+.env
+.env.local
