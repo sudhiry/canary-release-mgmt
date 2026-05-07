@@ -31,6 +31,9 @@ charts/*.tgz
 # canary-ctl local state
 .canary-ctl/
 
+# Local git worktrees
+.worktrees/
+
 # Logs and runtime
 *.log
 *.pid
