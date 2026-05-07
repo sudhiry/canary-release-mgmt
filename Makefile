@@ -2,7 +2,7 @@
 
 # Versions (pinned for reproducibility)
 KIND_CLUSTER_NAME := canary-release-mgmt
-ISTIO_VERSION    := 1.22.3
+ISTIO_VERSION    := 1.29.2
 STRIMZI_VERSION  := 0.43.0
 RESTATE_VERSION  := 1.1.5
 
