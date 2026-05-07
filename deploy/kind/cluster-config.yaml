@@ -1,7 +1,6 @@
 # deploy/kind/cluster-config.yaml
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
-name: canary-release-mgmt
 nodes:
   - role: control-plane
     extraPortMappings:

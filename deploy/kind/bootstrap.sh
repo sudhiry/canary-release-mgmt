@@ -11,7 +11,7 @@ echo "==> Creating kind cluster: ${KIND_CLUSTER_NAME}"
 if kind get clusters | grep -qx "${KIND_CLUSTER_NAME}"; then
   echo "    cluster already exists; skipping create"
 else
-  kind create cluster --config "${SCRIPT_DIR}/cluster-config.yaml" --wait 120s
+  kind create cluster --config "${SCRIPT_DIR}/cluster-config.yaml" --name "${KIND_CLUSTER_NAME}" --wait 120s
 fi
 
 kubectl config use-context "kind-${KIND_CLUSTER_NAME}"
