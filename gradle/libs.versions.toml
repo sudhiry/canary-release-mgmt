@@ -15,6 +15,7 @@ spring-kafka                   = { module = "org.springframework.kafka:spring-ka
 kafka-clients                  = { module = "org.apache.kafka:kafka-clients", version.ref = "kafka" }
 restate-sdk-api                = { module = "dev.restate:sdk-api", version.ref = "restateSdk" }
 restate-sdk-common             = { module = "dev.restate:sdk-common", version.ref = "restateSdk" }
+restate-sdk-http-vertx         = { module = "dev.restate:sdk-http-vertx",     version.ref = "restateSdk" }
 junit-jupiter                  = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
 junit-platform-launcher        = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junit" }
 mockito-core                   = { module = "org.mockito:mockito-core", version.ref = "mockito" }

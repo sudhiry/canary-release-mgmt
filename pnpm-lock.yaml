@@ -36,6 +36,16 @@ importers:
         specifier: ^2.1.1
         version: 2.1.9(@types/node@22.19.18)
 
+  platform/restate-defs-node:
+    dependencies:
+      '@restatedev/restate-sdk':
+        specifier: ^1.14.2
+        version: 1.14.2
+    devDependencies:
+      typescript:
+        specifier: ^5.6.2
+        version: 5.9.3
+
 packages:
 
   '@esbuild/aix-ppc64@0.21.5':
