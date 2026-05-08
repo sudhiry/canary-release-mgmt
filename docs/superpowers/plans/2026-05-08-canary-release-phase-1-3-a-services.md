@@ -84,6 +84,47 @@ The Restate Java SDK 2.7.0 and Node SDK 1.14.2 are wire-compatible with the runn
 
 The HTTP-controller→Ingress hop uses Spring's `RestClient` (Java) or axios (Node), pointed at `RESTATE_INGRESS_URL`. The 1.2 lib HTTP interceptors stamp `x-canary` automatically — no Restate-specific wrapper needed for the controller→Ingress hop.
 
+### Spring Boot 4.0.4 deviations from the plan's example code (verified against 4.0.4 jars)
+
+These two changes are the same across all 3 Java service tasks (audit, payment, inventory) — apply them everywhere the plan's example uses the older patterns:
+
+1. **`@WebMvcTest` was removed** from `spring-boot-test-autoconfigure-4.0.4.jar`. Controller tests must NOT use `@WebMvcTest(XController.class)` + `@MockitoBean` — instead use:
+   ```java
+   @ExtendWith(MockitoExtension.class)
+   class XControllerTest {
+     @Mock RestClient ingressClient;
+     @Mock XStore store;
+     MockMvc mockMvc;
+     ObjectMapper objectMapper = new ObjectMapper();
+
+     @BeforeEach
+     void setUp() {
+       var controller = new XController(ingressClient, store);
+       mockMvc = MockMvcBuilders.standaloneSetup(controller)
+         .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
+         .build();
+     }
+     // ...
+   }
+   ```
+   Drop `@MockitoBean` (replace with plain `@Mock`); use `MockitoExtension` + `MockMvcBuilders.standaloneSetup`.
+
+2. **`RestClientAutoConfiguration` was removed** from `spring-boot-autoconfigure-4.0.4.jar` — `RestClient.Builder` is NOT an autowire-able bean. Each service's `IngressClientConfig` must use `RestClient.builder()` (static factory) and manually apply `Consumer<RestClient.Builder>` customizers (which include the lib-java x-canary customizer):
+   ```java
+   @Bean
+   public RestClient ingressRestClient(
+           @Value("${app.restate.ingress.url}") String ingressUrl,
+           List<Consumer<RestClient.Builder>> builderCustomizers
+   ) {
+       RestClient.Builder builder = RestClient.builder().baseUrl(ingressUrl);
+       builderCustomizers.forEach(c -> c.accept(builder));
+       return builder.build();
+   }
+   ```
+   Critical: collecting `List<Consumer<RestClient.Builder>>` IS what wires lib-java's `xCanaryRestClientCustomizer` bean into this RestClient — preserve this pattern or x-canary stamping silently breaks on Ingress calls.
+
+These deviations apply to Tasks 5, 9, 13 (controller tests + IngressClientConfig). Smoke tests (Tasks 4, 8, 12) keep `@SpringBootTest(webEnvironment = NONE)` — that's still supported.
+
 ---
 
 ## Phase A — Shared platform additions
