@@ -153,6 +153,27 @@ sequenceDiagram
 
 **Key**: `P->>R` is the controller→Ingress hop *or* the handler's outbound R-to-R call (both stamp x-canary, via different SDK surfaces); `R->>...` and `Note over <pod>` indicate where the handler logic actually executes.
 
+### Kafka consumption topology
+
+The saga diagram above shows the synchronous HTTP + Restate request path only. Kafka events fan out **asynchronously** — consumers poll independently of the request thread, so they don't appear in a request-scoped sequence diagram.
+
+| Topic | Producer | Consumers in 1.3.a |
+|---|---|---|
+| `orders.events` | order-svc | payment, inventory, notification, audit |
+| `payments.events` | payment-svc | order, notification, audit |
+| `inventory.events` | inventory-svc | order, audit |
+| `notifications.events` | notification-svc | audit |
+| `audit.events` | audit-svc | (none — checkpoint topic for Phase 5 observability) |
+
+**Each service is its own Kafka consumer group.** No consumer-group sharing in Phase 1 (header-routed consumption is Phase 2).
+
+**What consumers do in 1.3.a:** the `@KafkaListener` (Java) / `consumer.run()` (Node) callback just appends `{topic, key, value, headers}` to a `List<ConsumedEvent>` exposed at `GET /internal/consumed-events`. **No business logic on receipt, no fan-out, no saga state machine.** Consumers in 1.3.a are purely an observability surface for Plan 1.5's e2e scenarios:
+
+- **S8 (header propagation completeness)** — assert `x-canary: true` is present on Kafka message headers of events that reached audit's `consumedEvents`.
+- **S10 (Kafka isolation)** — assert a canary pod's `consumedEvents` stays empty (canary pods set `KAFKA_CONSUMERS_ENABLED=false` so the listener bean isn't registered and `consumer.subscribe` is never called).
+
+Phase 2 introduces active consumption (route based on `x-canary` Kafka header); 1.3.a deliberately does not.
+
 ### Restate-to-Restate code sketch — Java (PaymentVO → AuditQueryService)
 
 ```java
