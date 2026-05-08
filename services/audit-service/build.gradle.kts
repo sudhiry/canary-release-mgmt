@@ -12,6 +12,7 @@ dependencies {
     implementation(libs.restate.sdk.api)
     implementation(libs.restate.sdk.common)
     implementation(libs.restate.sdk.http.vertx)
+    implementation(libs.vertx.core)
 
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.junit.jupiter)
