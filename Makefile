@@ -1,4 +1,4 @@
-.PHONY: help up down status smoke-infra dashboards dashboards-stop dashboards-status clean
+.PHONY: help up down status smoke-infra dashboards dashboards-stop dashboards-status verify clean
 
 # Versions (pinned for reproducibility)
 KIND_CLUSTER_NAME := canary-release-mgmt
@@ -32,5 +32,11 @@ dashboards-stop: ## Stop all dashboard port-forwards
 
 dashboards-status: ## Show which dashboard port-forwards are running
 	@bash deploy/kind/dashboards.sh status
+
+verify: ## Run all unit/library tests (Java + Node)
+	@echo "==> Java"
+	@./gradlew :platform:lib-java:test --quiet
+	@echo "==> Node"
+	@pnpm --filter @canary/lib-node test
 
 clean: down ## Alias for down
