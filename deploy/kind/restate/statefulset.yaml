@@ -16,14 +16,15 @@ spec:
     spec:
       containers:
         - name: restate
-          image: docker.io/restatedev/restate:1.1.5
+          image: docker.io/restatedev/restate:RESTATE_VERSION_PLACEHOLDER
           imagePullPolicy: IfNotPresent
           args:
             - --node-name
             - restate-0
           env:
-            - name: RESTATE_TRACING_ENDPOINT
-              value: ""
+            # RESTATE_TRACING_ENDPOINT is intentionally omitted: 1.6.x panics on
+            # an empty-string URI (regression vs 1.1.x). Omitting it disables
+            # tracing export without error.
             - name: RUST_LOG
               value: info
           ports:
