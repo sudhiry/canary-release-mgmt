@@ -46,3 +46,30 @@ Observability dashboards (run `make dashboards` to open all four in the backgrou
 Stop the port-forwards with `make dashboards-stop` (or `kill` the PIDs printed by `make dashboards`).
 
 Next phase: 1.2 (shared platform libraries for `x-canary` propagation).
+
+## Plan 1.2 — Shared platform libraries (complete)
+
+Two shared libraries propagate `x-canary: true` across HTTP, Kafka, and Restate boundaries:
+
+**Java side — `platform/lib-java`** (Spring Boot 4 starter):
+- `XCanaryRequestFilter` — inbound servlet filter; reads `x-canary` and stores in `XCanaryContext` (ThreadLocal).
+- `XCanaryRestClientInterceptor` — outbound HTTP interceptor (`ClientHttpRequestInterceptor`).
+- `XCanaryKafkaProducerInterceptor` — outbound Kafka header stamper.
+- `XCanaryRestateClientCustomizer` — outbound Restate metadata stamper.
+- `XCanaryAutoConfiguration` — Spring Boot 4 auto-config wiring all of above.
+
+**Node side — `platform/lib-node`** (TypeScript / pnpm workspace package):
+- `xCanaryMiddleware` — Express middleware; reads `x-canary` and stores in `AsyncLocalStorage`.
+- `attachXCanaryAxiosInterceptor` — outbound HTTP via axios.
+- `stampXCanaryOnProducerRecord` — outbound Kafka pre-send wrapper for KafkaJS records.
+- `applyXCanaryToRestateOptions` — outbound Restate per-call options helper.
+
+Build / test:
+
+| Command       | What it does                                       |
+| ------------- | -------------------------------------------------- |
+| `make verify` | Run all Java + Node unit tests (~36 tests total)   |
+| `./gradlew :platform:lib-java:test` | Java side only                |
+| `pnpm --filter @canary/lib-node test` | Node side only              |
+
+Next phase: 1.3 (the five domain services that consume these libraries).
