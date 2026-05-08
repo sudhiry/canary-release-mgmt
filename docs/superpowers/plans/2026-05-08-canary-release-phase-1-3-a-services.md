@@ -84,6 +84,49 @@ The Restate Java SDK 2.7.0 and Node SDK 1.14.2 are wire-compatible with the runn
 
 The HTTP-controller→Ingress hop uses Spring's `RestClient` (Java) or axios (Node), pointed at `RESTATE_INGRESS_URL`. The 1.2 lib HTTP interceptors stamp `x-canary` automatically — no Restate-specific wrapper needed for the controller→Ingress hop.
 
+### Restate Java SDK 2.7.0 deviations from the plan's example code (verified against the actual SDK)
+
+The plan's Restate-handler examples use the **annotation-processor** pattern (`Context` as first parameter). The SDK 2.7 jar ships the **reflection-based** API instead, which **rejects** Context-as-first-parameter at endpoint-bind time with this error:
+
+> `MalformedRestateServiceException: Failed to instantiate Restate service 'X'. Reason: The service is being loaded with the new Reflection based API, but handler 'Y' contains Context as first parameter.`
+
+The SDK suggests this canonical fix:
+
+```java
+// REJECTED in SDK 2.7 reflection API:
+public abstract void append(Context ctx, AuditEvent event) { ... }
+
+// ACCEPTED — drop Context from signature; access it via the public static accessor:
+public abstract void append(AuditEvent event) {
+    var ctx = dev.restate.sdk.Restate.context();   // for plain @Service
+    // OR: dev.restate.sdk.Restate.objectContext() for @VirtualObject
+    // OR: dev.restate.sdk.Restate.workflowContext() for @Workflow
+    // ... handler body uses ctx for ctx.call(...), ctx.set(STATE,...), etc.
+}
+```
+
+**Apply this everywhere the plan shows Context-as-first-parameter** (Tasks 6, 10, 14, 18, 22). The abstract classes in `platform/restate-defs-java` (Task 1) drop Context from method signatures; implementations and tests follow.
+
+**RestateHttpServer + Endpoint API** — the plan's `RestateHttpServer.fromEndpoint(Endpoint.builder().bind(handler).build())` is correct, but `RestateHttpServer.fromEndpoint(Endpoint)` returns `io.vertx.core.http.HttpServer` (a vertx type, not a Restate type). Listening + closing are async vertx Futures:
+
+```java
+@PostConstruct
+void start() throws Exception {
+    Endpoint endpoint = Endpoint.builder().bind(handler).build();
+    server = RestateHttpServer.fromEndpoint(endpoint);   // returns io.vertx.core.http.HttpServer
+    server.listen(port).toCompletionStage().toCompletableFuture().get();
+}
+
+@PreDestroy
+void stop() throws Exception {
+    if (server != null) {
+        server.close().toCompletionStage().toCompletableFuture().get();
+    }
+}
+```
+
+The Java service `build.gradle.kts` must add `implementation(libs.vertx.core)` to make `io.vertx.core.http.HttpServer` compile-visible (it is otherwise only a transitive runtime dep of `restate-sdk-http-vertx`). The `gradle/libs.versions.toml` already has `vertx-core` registered (added in Task 6).
+
 ### Spring Boot 4.0.4 deviations from the plan's example code (verified against 4.0.4 jars)
 
 These two changes are the same across all 3 Java service tasks (audit, payment, inventory) — apply them everywhere the plan's example uses the older patterns:
