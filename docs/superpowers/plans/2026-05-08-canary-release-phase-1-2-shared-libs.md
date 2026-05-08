@@ -121,7 +121,7 @@ If either is missing, stop and report NEEDS_CONTEXT.
 ```toml
 [versions]
 springBoot = "4.0.4"
-springDependencyManagement = "1.1.6"
+springDependencyManagement = "1.1.7"
 kafka = "3.9.0"
 restateSdk = "1.6.2"
 junit = "5.11.3"
@@ -164,7 +164,7 @@ include("platform:lib-java")
 ```kotlin
 plugins {
     java
-    id("io.spring.dependency-management") version "1.1.6" apply false
+    id("io.spring.dependency-management") version "1.1.7" apply false
 }
 
 allprojects {
@@ -200,14 +200,14 @@ subprojects {
 
 - [ ] **Step 5: Generate the Gradle wrapper**
 
-Run: `gradle wrapper --gradle-version 8.10 --distribution-type bin`
+Run: `gradle wrapper --gradle-version 9.5.0 --distribution-type bin`
 
-Expected: creates `gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.jar`, `gradle/wrapper/gradle-wrapper.properties`. Wrapper version 8.10+ supports JDK 25.
+Expected: creates `gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.jar`, `gradle/wrapper/gradle-wrapper.properties`. Gradle 9.5.0 supports JDK 25.
 
 - [ ] **Step 6: Verify the wrapper runs**
 
 Run: `./gradlew --version`
-Expected: prints Gradle 8.10.x and JVM 25.x.
+Expected: prints Gradle 9.5.0 and JVM 25.x.
 
 (`./gradlew projects` will fail until lib-java module exists in Task 2 — expected.)
 
