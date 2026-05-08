@@ -107,6 +107,30 @@ public abstract void append(AuditEvent event) {
 
 **Apply this everywhere the plan shows Context-as-first-parameter** (Tasks 6, 10, 14, 18, 22). The abstract classes in `platform/restate-defs-java` (Task 1) drop Context from method signatures; implementations and tests follow.
 
+**Restate-to-Restate calls in handlers (Tasks 10, 14)** — the plan's `ctx.serviceClient(X.class).call(X::method, input, opts)` syntax is from the older annotation-processor API and **does not exist** in SDK 2.7's Context interface. The actual `Context.call()` signature is `<T,R> CallDurableFuture<R> call(Request<T, R>)`. Build the Request via:
+
+```java
+import dev.restate.common.Request;
+import dev.restate.common.Target;
+import dev.restate.serde.TypeTag;
+
+var ctx = Restate.context();   // or objectContext() / workflowContext() per primitive
+var opts = canaryCustomizer.apply(InvocationOptions.builder());   // x-canary stamp from XCanaryContext
+var req = Request.of(
+        Target.service("AuditQueryService", "append"),    // for @Service
+        // OR: Target.virtualObject("PaymentVO", orderId, "charge") for @VirtualObject keyed call
+        // OR: Target.workflow("CheckoutSaga", workflowId, "run") for @Workflow keyed call
+        TypeTag.of(AuditEvent.class),
+        TypeTag.of(Void.class),
+        new AuditEvent(...)
+    ).toBuilder()
+    .headers(opts.getHeaders())
+    .build();
+ctx.call(req);   // or ctx.send(req) for fire-and-forget
+```
+
+The exact `Target.service(...)` / `Target.virtualObject(...)` / `Target.workflow(...)` factory names should be verified against `dev.restate.common.Target` in your SDK build (probe with `javap -public dev.restate.common.Target`). Adjust if signatures differ — preserve the structural intent: stamp x-canary onto the Request's headers via `XCanaryRestateClientCustomizer.apply(InvocationOptions.builder())`.
+
 **RestateHttpServer + Endpoint API** — the plan's `RestateHttpServer.fromEndpoint(Endpoint.builder().bind(handler).build())` is correct, but `RestateHttpServer.fromEndpoint(Endpoint)` returns `io.vertx.core.http.HttpServer` (a vertx type, not a Restate type). Listening + closing are async vertx Futures:
 
 ```java
