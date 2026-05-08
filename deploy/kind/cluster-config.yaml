@@ -1,0 +1,17 @@
+# deploy/kind/cluster-config.yaml
+# Note: cluster name is passed via the --name flag from bootstrap.sh
+# (which uses the KIND_CLUSTER_NAME env var). This file intentionally omits the
+# top-level "name:" field so the env var is the single source of truth.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # Istio ingress gateway HTTP
+      - containerPort: 30080
+        hostPort: 8080
+        protocol: TCP
+      # Restate ingress (for invoking handlers from outside the cluster, dev only)
+      - containerPort: 30090
+        hostPort: 9070
+        protocol: TCP
