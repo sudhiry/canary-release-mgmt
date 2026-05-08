@@ -10,6 +10,7 @@ build/
 .project
 .settings/
 
+
 # Node / TypeScript
 node_modules/
 dist/
@@ -24,6 +25,7 @@ coverage/
 *.iml
 *.swp
 .DS_Store
+.claude/
 
 # Kubernetes / Helm
 charts/*.tgz
