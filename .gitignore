@@ -31,6 +31,9 @@ charts/*.tgz
 # canary-ctl local state
 .canary-ctl/
 
+# Dashboard port-forward PIDs and logs
+.dashboards/
+
 # Local git worktrees
 .worktrees/
 

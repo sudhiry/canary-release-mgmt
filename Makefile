@@ -1,4 +1,4 @@
-.PHONY: help up down status smoke-infra clean
+.PHONY: help up down status smoke-infra dashboards dashboards-stop dashboards-status clean
 
 # Versions (pinned for reproducibility)
 KIND_CLUSTER_NAME := canary-release-mgmt
@@ -23,5 +23,14 @@ status: ## Show pod state across infra namespaces
 
 smoke-infra: ## Run infrastructure smoke tests
 	@bats tests/infra/smoke.bats
+
+dashboards: ## Open port-forwards to Kiali/Grafana/Prometheus/Jaeger (background)
+	@bash deploy/kind/dashboards.sh start
+
+dashboards-stop: ## Stop all dashboard port-forwards
+	@bash deploy/kind/dashboards.sh stop
+
+dashboards-status: ## Show which dashboard port-forwards are running
+	@bash deploy/kind/dashboards.sh status
 
 clean: down ## Alias for down
