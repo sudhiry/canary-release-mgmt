@@ -26,3 +26,14 @@ KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-canary-release-mgmt}"
   [ "$status" -eq 0 ]
   [ "$output" = "True" ]
 }
+
+@test "restate server is Ready" {
+  wait_for_pod_ready restate "app=restate" 120
+}
+
+@test "restate admin endpoint responds" {
+  run kubectl -n restate exec restate-0 -- \
+    curl -sf -o /dev/null -w '%{http_code}' http://localhost:9070/health
+  [ "$status" -eq 0 ]
+  [ "$output" = "200" ]
+}

@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: restate
+  namespace: restate
+spec:
+  serviceName: restate-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: restate
+  template:
+    metadata:
+      labels:
+        app: restate
+    spec:
+      containers:
+        - name: restate
+          image: docker.io/restatedev/restate:1.1.5
+          imagePullPolicy: IfNotPresent
+          args:
+            - --node-name
+            - restate-0
+          env:
+            - name: RESTATE_TRACING_ENDPOINT
+              value: ""
+            - name: RUST_LOG
+              value: info
+          ports:
+            - name: ingress
+              containerPort: 8080
+            - name: admin
+              containerPort: 9070
+            - name: node
+              containerPort: 5122
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 9070
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 9070
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: 256Mi
+              cpu: 200m
+            limits:
+              memory: 1Gi
+              cpu: 1000m
+          volumeMounts:
+            - name: data
+              mountPath: /restate-data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
