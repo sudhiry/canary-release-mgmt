@@ -1,0 +1,10 @@
+{
+  "name": "canary-release-mgmt",
+  "private": true,
+  "version": "0.0.1",
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "test:node": "pnpm -r --filter './platform/lib-node' run test",
+    "build:node": "pnpm -r --filter './platform/lib-node' run build"
+  }
+}

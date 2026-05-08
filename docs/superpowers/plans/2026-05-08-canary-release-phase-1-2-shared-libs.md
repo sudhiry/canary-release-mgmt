@@ -7,7 +7,7 @@
 **Architecture:** Each library exposes the same conceptual surface in its native idiom: an inbound filter/middleware that reads `x-canary` from the incoming request and stores it in a request-scoped context, and outbound interceptors for HTTP / Kafka / Restate clients that read the context and stamp the header onto every outgoing call. Java side uses Spring Boot 4 auto-configuration; Node side exports plain functions/classes consumed via pnpm workspaces. Both ship with focused unit tests of the propagation primitive itself.
 
 **Tech Stack:**
-- **Java side:** JDK 25 + Spring Boot 4.0.4 + Gradle Kotlin DSL (root multi-project) + JUnit 5 + Mockito + Spring Kafka + Restate Java SDK (latest 1.x)
+- **Java side:** JDK 25 + Spring Boot 4.0.4 + Gradle Kotlin DSL (root multi-project) + JUnit 6 + Mockito + Spring Kafka + Restate Java SDK (2.x)
 - **Node side:** Node 22 LTS + TypeScript 5.x (strict) + pnpm workspaces + Express + axios + KafkaJS + @restatedev/restate-sdk + Vitest
 
 **Spec reference:** `docs/superpowers/specs/2026-05-08-canary-release-phase-1-design.md` (sections "Components and repo layout" → `lib-java` and `lib-node`).
@@ -63,6 +63,7 @@ canary-release-mgmt/
 │   │               ├── XCanaryRequestFilterTest.java
 │   │               ├── XCanaryRestClientInterceptorTest.java
 │   │               ├── XCanaryKafkaProducerInterceptorTest.java
+│   │               ├── XCanaryRestateClientCustomizerTest.java
 │   │               └── XCanaryAutoConfigurationTest.java
 │   └── lib-node/
 │       ├── package.json
@@ -121,10 +122,11 @@ If either is missing, stop and report NEEDS_CONTEXT.
 ```toml
 [versions]
 springBoot = "4.0.4"
-springDependencyManagement = "1.1.6"
+springDependencyManagement = "1.1.7"
 kafka = "3.9.0"
-restateSdk = "1.6.2"
-junit = "5.11.3"
+restateSdk = "2.7.0"
+junit = "6.0.3"
+junitPlatform = "6.0.3"
 mockito = "5.14.2"
 assertj = "3.26.3"
 
@@ -137,6 +139,7 @@ kafka-clients                  = { module = "org.apache.kafka:kafka-clients", ve
 restate-sdk-api                = { module = "dev.restate:sdk-api", version.ref = "restateSdk" }
 restate-sdk-common             = { module = "dev.restate:sdk-common", version.ref = "restateSdk" }
 junit-jupiter                  = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
+junit-platform-launcher        = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junitPlatform" }
 mockito-core                   = { module = "org.mockito:mockito-core", version.ref = "mockito" }
 assertj-core                   = { module = "org.assertj:assertj-core", version.ref = "assertj" }
 
@@ -164,7 +167,7 @@ include("platform:lib-java")
 ```kotlin
 plugins {
     java
-    id("io.spring.dependency-management") version "1.1.6" apply false
+    id("io.spring.dependency-management") version "1.1.7" apply false
 }
 
 allprojects {
@@ -200,14 +203,14 @@ subprojects {
 
 - [ ] **Step 5: Generate the Gradle wrapper**
 
-Run: `gradle wrapper --gradle-version 8.10 --distribution-type bin`
+Run: `gradle wrapper --gradle-version 9.5.0 --distribution-type bin`
 
-Expected: creates `gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.jar`, `gradle/wrapper/gradle-wrapper.properties`. Wrapper version 8.10+ supports JDK 25.
+Expected: creates `gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.jar`, `gradle/wrapper/gradle-wrapper.properties`. Gradle 9.5.0 supports JDK 25.
 
 - [ ] **Step 6: Verify the wrapper runs**
 
 Run: `./gradlew --version`
-Expected: prints Gradle 8.10.x and JVM 25.x.
+Expected: prints Gradle 9.5.0 and JVM 25.x.
 
 (`./gradlew projects` will fail until lib-java module exists in Task 2 — expected.)
 
@@ -792,7 +795,7 @@ git commit -m "feat(lib-java): add XCanaryKafkaProducerInterceptor (outbound Kaf
 ## Task 6: lib-java outbound Restate — XCanaryRestateClientCustomizer
 
 **Note for the implementer:** the Restate Java SDK's exact public API for client interception varies across versions. The Restate Java SDK 1.6 exposes outbound calls via `dev.restate.sdk.client.*`; sending custom headers/metadata uses `CallRequestOptions` (or equivalent). The implementer should:
-1. Inspect the actual classes available on the classpath after `./gradlew :platform:lib-java:dependencies` resolves `dev.restate:sdk-api:1.6.2` and `dev.restate:sdk-common:1.6.2`.
+1. Inspect the actual classes available on the classpath after `./gradlew :platform:lib-java:dependencies` resolves `dev.restate:sdk-api:2.7.0` and `dev.restate:sdk-common:2.7.0`.
 2. Build a thin customizer/wrapper class named `XCanaryRestateClientCustomizer` that, given a Restate client builder OR a per-call options object, attaches `x-canary: true` when the context flag is set.
 3. If the SDK does not yet support per-call headers via a public API in 1.6, implement a passthrough wrapper that documents the limitation and report DONE_WITH_CONCERNS — do not block the rest of the plan; the wrapper exists, gets exercised by tests for the no-op path, and Phase 3 will revisit when handler-side routing is built.
 
@@ -800,11 +803,11 @@ git commit -m "feat(lib-java): add XCanaryKafkaProducerInterceptor (outbound Kaf
 - Create: `platform/lib-java/src/main/java/com/canary/platform/lib/XCanaryRestateClientCustomizer.java`
 - Create: `platform/lib-java/src/test/java/com/canary/platform/lib/XCanaryRestateClientCustomizerTest.java`
 
-- [ ] **Step 1: Inspect the Restate Java SDK 1.6.2 API**
+- [ ] **Step 1: Inspect the Restate Java SDK 2.7.0 API**
 
 Run: `./gradlew :platform:lib-java:dependencies --configuration runtimeClasspath | grep restate`
 
-Then briefly explore the resolved jars (e.g., via `unzip -l ~/.gradle/caches/.../sdk-api-1.6.2.jar`) to find:
+Then briefly explore the resolved jars (e.g., via `unzip -l ~/.gradle/caches/.../sdk-api-2.7.0.jar`) to find:
 - The class that represents an outbound call's options/headers
 - Any existing customizer/interceptor SPI
 
@@ -1061,7 +1064,7 @@ packages:
     "axios": "^1.7.7",
     "express": "^4.21.0",
     "kafkajs": "^2.2.4",
-    "@restatedev/restate-sdk": "^1.6.0"
+    "@restatedev/restate-sdk": "^1.14.2"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
@@ -1531,14 +1534,14 @@ git commit -m "feat(lib-node): add x-canary stamper for KafkaJS producer records
 
 ## Task 12: lib-node outbound Restate — client wrapper
 
-**Note for the implementer:** the @restatedev/restate-sdk 1.6 client API may expose per-call header/metadata options as part of the call builder. Inspect with:
+**Note for the implementer:** the @restatedev/restate-sdk 1.14.x client API may expose per-call header/metadata options as part of the call builder. Inspect with:
 
 ```
 pnpm --filter @canary/lib-node why @restatedev/restate-sdk
 ls node_modules/@restatedev/restate-sdk/dist
 ```
 
-If the SDK exposes a `.withHeaders()` / `.headers({...})` builder method on the outbound call, wrap that. If not, build a thin wrapper that pre-attaches `x-canary` via whatever metadata mechanism exists (often a per-invocation options object on `client.serviceClient(...).callerHeaders({...}).foo()` or similar). If 1.6 has no public surface for this, ship a passthrough wrapper documented as a Phase 3 follow-up; report DONE_WITH_CONCERNS.
+If the SDK exposes a `.withHeaders()` / `.headers({...})` builder method on the outbound call, wrap that. If not, build a thin wrapper that pre-attaches `x-canary` via whatever metadata mechanism exists (often a per-invocation options object on `client.serviceClient(...).callerHeaders({...}).foo()` or similar). If 1.14.x has no public surface for this, ship a passthrough wrapper documented as a Phase 3 follow-up; report DONE_WITH_CONCERNS.
 
 **Files:**
 - Create: `platform/lib-node/src/x-canary-restate.ts`
@@ -1606,7 +1609,7 @@ import { X_CANARY_HEADER, X_CANARY_TRUE } from "./x-canary-constants.js";
  * Applies x-canary: true to the headers field of a Restate per-call options
  * object when the current async context is canary. Adjust the field name
  * (headers / metadata / etc.) to match the actual @restatedev/restate-sdk
- * 1.6 API discovered in Step 1.
+ * 1.14.x API discovered in Step 1.
  */
 export function applyXCanaryToRestateOptions<T extends { headers?: Record<string, string> }>(
   options: T
