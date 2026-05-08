@@ -37,3 +37,19 @@ KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-canary-release-mgmt}"
   [ "$status" -eq 0 ]
   [ "$output" = "200" ]
 }
+
+@test "prometheus is Ready" {
+  wait_for_pod_ready istio-system "app.kubernetes.io/name=prometheus" 120
+}
+
+@test "grafana is Ready" {
+  wait_for_pod_ready istio-system "app.kubernetes.io/name=grafana" 120
+}
+
+@test "kiali is Ready" {
+  wait_for_pod_ready istio-system "app=kiali" 120
+}
+
+@test "jaeger is Ready" {
+  wait_for_pod_ready istio-system "app=jaeger" 120
+}

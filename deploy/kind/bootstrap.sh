@@ -28,4 +28,7 @@ bash "${SCRIPT_DIR}/kafka/strimzi-operator-install.sh"
 echo "==> Installing Restate"
 bash "${SCRIPT_DIR}/restate/install.sh"
 
+echo "==> Installing observability addons"
+bash "${SCRIPT_DIR}/observability/install.sh"
+
 echo "==> Bootstrap complete"
