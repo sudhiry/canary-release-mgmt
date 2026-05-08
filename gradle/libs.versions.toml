@@ -1,0 +1,24 @@
+[versions]
+springBoot = "4.0.4"
+springDependencyManagement = "1.1.7"
+kafka = "3.9.0"
+restateSdk = "1.6.2"
+junit = "5.11.3"
+mockito = "5.14.2"
+assertj = "3.26.3"
+
+[libraries]
+spring-boot-starter-web        = { module = "org.springframework.boot:spring-boot-starter-web" }
+spring-boot-starter-test       = { module = "org.springframework.boot:spring-boot-starter-test" }
+spring-boot-autoconfigure      = { module = "org.springframework.boot:spring-boot-autoconfigure" }
+spring-kafka                   = { module = "org.springframework.kafka:spring-kafka" }
+kafka-clients                  = { module = "org.apache.kafka:kafka-clients", version.ref = "kafka" }
+restate-sdk-api                = { module = "dev.restate:sdk-api", version.ref = "restateSdk" }
+restate-sdk-common             = { module = "dev.restate:sdk-common", version.ref = "restateSdk" }
+junit-jupiter                  = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit" }
+mockito-core                   = { module = "org.mockito:mockito-core", version.ref = "mockito" }
+assertj-core                   = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+
+[plugins]
+spring-boot                    = { id = "org.springframework.boot",                  version.ref = "springBoot" }
+spring-dependency-management   = { id = "io.spring.dependency-management",           version.ref = "springDependencyManagement" }
