@@ -15,3 +15,14 @@ KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-canary-release-mgmt}"
 @test "istio-ingressgateway is Ready" {
   wait_for_pod_ready istio-system "app=istio-ingressgateway" 60
 }
+
+@test "strimzi cluster operator is Ready" {
+  wait_for_pod_ready kafka "name=strimzi-cluster-operator" 120
+}
+
+@test "kafka cluster reports Ready" {
+  run kubectl -n kafka get kafka my-cluster \
+    -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "True" ]
+}

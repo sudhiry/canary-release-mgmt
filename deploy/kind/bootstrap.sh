@@ -21,3 +21,6 @@ echo "==> Cluster ready"
 
 echo "==> Installing Istio"
 bash "${SCRIPT_DIR}/istio/install.sh"
+
+echo "==> Installing Strimzi + Kafka"
+bash "${SCRIPT_DIR}/kafka/strimzi-operator-install.sh"
