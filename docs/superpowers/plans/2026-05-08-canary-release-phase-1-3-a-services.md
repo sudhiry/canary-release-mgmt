@@ -279,7 +279,6 @@ public abstract class NotificationService {
 ```java
 package com.canary.restate.order;
 
-import com.canary.restate.payment.Charge;
 import dev.restate.sdk.WorkflowContext;
 import dev.restate.sdk.annotation.Handler;
 import dev.restate.sdk.annotation.Workflow;
