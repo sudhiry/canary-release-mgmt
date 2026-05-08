@@ -6,6 +6,9 @@ import com.canary.platform.lib.XCanaryRestClientInterceptor;
 import com.canary.platform.lib.XCanaryRestateClientCustomizer;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.context.annotation.Bean;
+import org.springframework.web.client.RestClient;
+
+import java.util.function.Consumer;
 
 @AutoConfiguration
 public class XCanaryAutoConfiguration {
@@ -18,6 +21,11 @@ public class XCanaryAutoConfiguration {
     @Bean
     public XCanaryRestClientInterceptor xCanaryRestClientInterceptor() {
         return new XCanaryRestClientInterceptor();
+    }
+
+    @Bean
+    public Consumer<RestClient.Builder> xCanaryRestClientCustomizer(XCanaryRestClientInterceptor interceptor) {
+        return builder -> builder.requestInterceptor(interceptor);
     }
 
     @Bean
