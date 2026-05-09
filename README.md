@@ -279,3 +279,40 @@ make e2e SCENARIO=s7                                      # run one
 Each service stamps `<svc>=<version>` and prepends downstream service tokens captured via the axios/RestClient response interceptor. Tests parse the comma-separated chain to verify multi-hop routing without needing Jaeger.
 
 Phase 1 is complete. Next: Phase 2 (Kafka canary consumer strategies).
+
+## Plan 2.a — Kafka canary consumer foundation (complete)
+
+Phase 2.a ships the **lib code + Helm RBAC** for canary-aware Kafka consumption. NOT yet wired into services — that lands in Plan 2.b. After 2.a merges, the cluster's behavior is unchanged; the new lib code sits unused until 2.b consumes it.
+
+### What landed
+
+**lib-java** (`platform/lib-java/`):
+- `XCanaryConsumerGroupIdResolver` — appends `-stable` / `-canary` to base group IDs so each subset joins its own consumer group
+- `XCanaryConsumeFilter` — per-message decision: canary processes only `x-canary=true`; stable processes all non-canary plus canary-flagged when canary is absent (graceful fallback)
+- `XCanaryConsumeContext.runWith(headers, handler)` — wraps a Kafka consume callback in an `XCanaryContext` frame so outbound HTTP/Kafka/Restate calls inherit `x-canary`
+- `XCanaryPresenceWatcher` — opens a long-lived k8s watch on `Pods` matching `app=<svc>,version=canary`; maintains an atomic `canaryReady` flag updated push-style by watch events
+- `KafkaConsumerHealthIndicator` — Spring Actuator HealthIndicator that reports OUT_OF_SERVICE if no successful Kafka poll within 30s (configurable)
+
+**lib-node** (`platform/lib-node/`): equivalent set — `resolveConsumerGroupId`, `shouldProcess`, `runWithCanaryFromHeaders`, `XCanaryPresenceWatcher`, `createKafkaHealthState`.
+
+**Helm chart** (`deploy/helm/service-chart/`): new `Role` + `RoleBinding` granting the service's ServiceAccount `pods` get/list/watch in its namespace. Conditional on `.Values.canaryWatch.enabled` (default `true`).
+
+### How presence detection works
+
+Each stable pod opens a long-lived watch on canary-version pods in its namespace. K8s pushes events as canary deploys/rolls back/crashes — typical detection lag is <1s. Hot-path consume filter is an O(1) atomic flag read; no per-message API calls.
+
+The canary pod's readiness probe is gated on Kafka consumer health (Plan 2.b adds the wiring to call `recordPoll()` after each successful consume). When the canary's consumer disconnects, the readiness probe fails → kubelet drops the pod from the EndpointSlice → stable's pod watch sees the pod transition to `Ready=False` → stable's flag flips → stable processes the next canary-flagged event.
+
+### Operator smoke check (after deploy)
+
+```bash
+# RBAC works:
+kubectl auth can-i watch pods -n services --as=system:serviceaccount:services:payment-service
+# Expected: yes
+
+# HealthIndicator surfaces (Java services with Actuator):
+kubectl -n services exec deploy/payment-service-stable -- curl -s localhost:8081/actuator/health | jq '.components | keys'
+# Expected: includes "kafkaConsumer" (Spring auto-discovers HealthIndicator beans by class name → camelCase)
+```
+
+Next: Plan 2.b wires these abstractions into all 5 services, flips `KAFKA_CONSUMERS_ENABLED=true` in canary-overlay, and adds Phase 2 e2e scenarios K1–K5.
