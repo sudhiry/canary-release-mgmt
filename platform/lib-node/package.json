@@ -17,6 +17,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@kubernetes/client-node": "^1.0.0",
     "axios": "^1.7.7",
     "express": "^4.21.0",
     "kafkajs": "^2.2.4",
