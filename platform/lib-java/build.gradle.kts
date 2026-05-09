@@ -9,6 +9,8 @@ dependencies {
     api(libs.restate.sdk.api)
     api(libs.restate.sdk.common)
 
+    implementation("io.fabric8:kubernetes-client:7.4.0")
+
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.mockito.core)
