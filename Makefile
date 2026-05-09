@@ -1,4 +1,4 @@
-.PHONY: help up down status smoke-infra dashboards dashboards-stop dashboards-status verify build-services build-images load-images images deploy-services undeploy-services smoke-services clean
+.PHONY: help up down status smoke-infra dashboards dashboards-stop dashboards-status verify build-services build-images load-images images deploy-services undeploy-services smoke-services clean e2e ci-local
 
 # Versions (pinned for reproducibility)
 KIND_CLUSTER_NAME := canary-release-mgmt
@@ -9,7 +9,7 @@ RESTATE_VERSION  := 1.6.2
 export KIND_CLUSTER_NAME ISTIO_VERSION STRIMZI_VERSION RESTATE_VERSION
 
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 	  sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
 
 up: ## Bootstrap kind cluster + Istio + Kafka + Restate
@@ -89,3 +89,15 @@ smoke-canary: ## Run canary-ctl bats smoke tests (requires deployed substrate)
 	@pnpm --filter @canary/canary-ctl build >/dev/null
 	@pnpm --filter @canary/traffic-cli build >/dev/null
 	@bats tests/canary/canary-ctl.bats
+
+e2e: ## Run e2e scenarios (use SCENARIO=<name> to run a single file)
+	@pnpm --filter @canary/e2e build >/dev/null
+	@if [ -n "$(SCENARIO)" ]; then \
+		E2E_SCENARIOS=1 pnpm --filter @canary/e2e exec vitest run $(SCENARIO); \
+	else \
+		E2E_SCENARIOS=1 pnpm --filter @canary/e2e test; \
+	fi
+
+ci-local: ## Run fast e2e subset (S1 in 1.5.a; S1+S2+S5+S8+S9+S12 in 1.5.b)
+	@pnpm --filter @canary/e2e build >/dev/null
+	@E2E_SCENARIOS=1 pnpm --filter @canary/e2e exec vitest run s1

@@ -2,8 +2,10 @@ package com.canary.platform.lib.autoconfigure;
 
 import com.canary.platform.lib.XCanaryKafkaProducerInterceptor;
 import com.canary.platform.lib.XCanaryRequestFilter;
+import com.canary.platform.lib.XCanaryResponseHeaderFilter;
 import com.canary.platform.lib.XCanaryRestClientInterceptor;
 import com.canary.platform.lib.XCanaryRestateClientCustomizer;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.web.client.RestClient;
@@ -16,6 +18,12 @@ public class XCanaryAutoConfiguration {
     @Bean
     public XCanaryRequestFilter xCanaryRequestFilter() {
         return new XCanaryRequestFilter();
+    }
+
+    @Bean
+    public XCanaryResponseHeaderFilter xCanaryResponseHeaderFilter(
+            @Value("${canary.version:${VERSION:stable}}") String version) {
+        return new XCanaryResponseHeaderFilter(version);
     }
 
     @Bean

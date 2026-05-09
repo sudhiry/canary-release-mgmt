@@ -6,6 +6,7 @@ metadata:
   labels:
     {{- include "service-chart.labels" . | nindent 4 }}
 data:
+  VERSION: {{ .Values.version | quote }}
 {{- range $k, $v := .Values.env }}
   {{ $k }}: {{ $v | quote }}
 {{- end }}
