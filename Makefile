@@ -93,11 +93,11 @@ smoke-canary: ## Run canary-ctl bats smoke tests (requires deployed substrate)
 e2e: ## Run e2e scenarios (use SCENARIO=<name> to run a single file)
 	@pnpm --filter @canary/e2e build >/dev/null
 	@if [ -n "$(SCENARIO)" ]; then \
-		pnpm --filter @canary/e2e exec vitest run $(SCENARIO); \
+		E2E_SCENARIOS=1 pnpm --filter @canary/e2e exec vitest run $(SCENARIO); \
 	else \
-		pnpm --filter @canary/e2e test; \
+		E2E_SCENARIOS=1 pnpm --filter @canary/e2e test; \
 	fi
 
 ci-local: ## Run fast e2e subset (S1 in 1.5.a; S1+S2+S5+S8+S9+S12 in 1.5.b)
 	@pnpm --filter @canary/e2e build >/dev/null
-	@pnpm --filter @canary/e2e exec vitest run s1
+	@E2E_SCENARIOS=1 pnpm --filter @canary/e2e exec vitest run s1

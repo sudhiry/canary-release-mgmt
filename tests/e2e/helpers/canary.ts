@@ -1,10 +1,16 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 
 const execFileAsync = promisify(execFile);
 
-const REPO_ROOT = resolve(process.cwd(), process.env.E2E_REPO_ROOT ?? ".");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+// canary.ts is at tests/e2e/helpers/canary.ts → 3 levels up to repo root.
+const REPO_ROOT = process.env.E2E_REPO_ROOT
+  ? resolve(process.env.E2E_REPO_ROOT)
+  : resolve(__dirname, "..", "..", "..");
 const CANARY_CTL = resolve(REPO_ROOT, "tools/canary-ctl/bin/canary-ctl");
 
 interface CanaryCtlOpts {
