@@ -1,6 +1,12 @@
 import express, { type Express } from "express";
 import axios, { type AxiosInstance } from "axios";
-import { xCanaryMiddleware, xServedVersionMiddleware, attachXCanaryAxiosInterceptor } from "@canary/lib-node";
+import {
+  xCanaryMiddleware,
+  xServedVersionMiddleware,
+  xServedChainMiddleware,
+  attachXCanaryAxiosInterceptor,
+  attachXServedChainAxiosInterceptor,
+} from "@canary/lib-node";
 import type { NotifyRequest } from "@canary/restate-defs-node";
 import { notificationStore, consumedEventStore } from "./store.js";
 
@@ -11,6 +17,7 @@ export interface HttpDeps {
 export function buildIngressClient(ingressUrl: string): AxiosInstance {
   const client = axios.create({ baseURL: ingressUrl });
   attachXCanaryAxiosInterceptor(client);
+  attachXServedChainAxiosInterceptor(client);
   return client;
 }
 
@@ -20,6 +27,7 @@ export function setupHttp(deps: HttpDeps): Express {
   app.get("/health", (_req, res) => res.json({ ok: true }));
   app.use(xCanaryMiddleware);
   app.use(xServedVersionMiddleware());
+  app.use(xServedChainMiddleware());
 
   app.post("/notifications", async (req, res) => {
     const body = req.body as NotifyRequest;
