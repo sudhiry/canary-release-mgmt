@@ -1,0 +1,14 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: inventory-service
+  namespace: services
+spec:
+  host: inventory-service.services.svc.cluster.local
+  subsets:
+    - name: stable
+      labels:
+        version: stable
+    - name: canary
+      labels:
+        version: canary

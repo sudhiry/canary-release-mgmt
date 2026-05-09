@@ -105,4 +105,58 @@ Build / test:
 
 **Phase 1.3.a is code only — no deployment artifacts.** Dockerfiles, KafkaTopic CRDs, k8s manifests, image build scripts, and the canary Helm overlay are 1.3.b.
 
-Next phase: 1.3.b (deployment artifacts so the services run on the kind cluster from Plan 1.1).
+## Plan 1.3.b — Deployment to kind (complete)
+
+After Plan 1.3.a (services compile + tests green), Plan 1.3.b deploys all five services to the kind cluster behind Istio routing. Stable-only traffic; canary lifecycle is Plan 1.4.
+
+### Quickstart
+
+```bash
+make up                  # bootstrap cluster + Istio + Kafka + Restate (1.1)
+make build-services      # compile Java + Node (1.3.a)
+make build-images        # docker build all 5 service images
+make load-images         # kind load image cache
+make deploy-services     # KafkaTopics + Helm install + Istio routing
+make smoke-services      # bats smoke test
+```
+
+### What this ships
+
+- 5 multi-stage Dockerfiles (`services/<svc>/Dockerfile`)
+- 5 Strimzi `KafkaTopic` CRDs (`deploy/kafka/topics/`)
+- One shared Helm chart (`deploy/helm/service-chart/`) parameterized by per-service values files (`deploy/helm/values/<svc>.yaml`)
+- `canary-overlay.yaml` values file (used by Plan 1.4 canary-ctl; checked in but not applied)
+- 5 `DestinationRule` + 5 default-only `VirtualService` files (`deploy/routing/`)
+- Istio `Gateway` + edge `VirtualService` (`/api/orders` → order-service)
+- Per-service Helm post-install Job that registers handlers with Restate Admin
+
+### Service inventory
+
+| Service | Stack | HTTP port | Restate port | Probes |
+|---|---|---|---|---|
+| audit-service | Java + Spring Boot | 8083 | 9083 | /actuator/health/{liveness,readiness} |
+| payment-service | Java + Spring Boot | 8081 | 9081 | /actuator/health/{liveness,readiness} |
+| inventory-service | Java + Spring Boot | 8082 | 9082 | /actuator/health/{liveness,readiness} |
+| order-service | TypeScript + Node | 3001 | 9084 | /health |
+| notification-service | TypeScript + Node | 3002 | 9085 | /health |
+
+### Verifying
+
+```bash
+make smoke-services      # 5 bats assertions, ~60s
+kubectl get -n services pods,svc,deploy
+kubectl get -n services destinationrules,virtualservices
+helm list -n services    # should show 5 releases, all deployed
+curl -s http://localhost:9070/deployments | jq '.deployments | length'  # 5
+curl -s -X POST -H 'content-type: application/json' \
+  -d '{"userId":"u1","sku":"sku-1","quantity":1,"amount":100}' \
+  http://localhost:8080/api/orders
+```
+
+### Tearing down (without destroying the cluster)
+
+```bash
+make undeploy-services
+```
+
+Next phase: 1.4 (canary-ctl + per-service VirtualService header rule for `x-canary: true`).

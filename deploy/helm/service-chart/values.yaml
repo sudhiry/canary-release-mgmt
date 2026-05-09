@@ -1,0 +1,48 @@
+# Required per release; no default
+serviceName: ""
+
+image:
+  repository: canary-release-mgmt
+  tag: dev
+  pullPolicy: IfNotPresent
+
+# stable | canary; canary overlay sets this to "canary"
+version: stable
+
+replicas: 1
+
+# Container ports — overridden per service
+ports:
+  http: 8080
+  restateHandler: 9080
+
+# Shared env vars — base; per-service files extend, canary overlay overrides
+env:
+  KAFKA_BOOTSTRAP_SERVERS: my-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092
+  RESTATE_INGRESS_URL: http://restate.restate.svc.cluster.local:8080
+  RESTATE_ADMIN_URL: http://restate.restate.svc.cluster.local:9070
+  KAFKA_CONSUMERS_ENABLED: "true"
+  RESTATE_REGISTER_HANDLERS: "true"
+
+# Service-specific extra env (e.g., order-service downstream URLs)
+extraEnv: {}
+
+# Probe paths — Java services override to /actuator/health/{liveness,readiness}
+probes:
+  liveness:
+    path: /health
+  readiness:
+    path: /health
+
+# Resource defaults (Node profile); Java services override to higher
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+# Whether to render the post-install Restate-registration Job (canary skips)
+restate:
+  registerEndpoint: true

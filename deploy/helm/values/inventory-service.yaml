@@ -1,0 +1,16 @@
+serviceName: inventory-service
+ports:
+  http: 8082
+  restateHandler: 9082
+probes:
+  liveness:
+    path: /actuator/health/liveness
+  readiness:
+    path: /actuator/health/readiness
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 512Mi

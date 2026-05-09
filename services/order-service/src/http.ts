@@ -20,6 +20,7 @@ export function buildClient(baseURL: string): AxiosInstance {
 export function setupHttp(deps: HttpDeps): Express {
   const app = express();
   app.use(express.json());
+  app.get("/health", (_req, res) => res.json({ ok: true }));
   app.use(xCanaryMiddleware);
 
   app.post("/api/orders", async (req, res) => {

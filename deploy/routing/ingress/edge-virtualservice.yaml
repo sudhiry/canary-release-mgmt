@@ -1,0 +1,19 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: edge
+  namespace: services
+spec:
+  hosts:
+    - "*"
+  gateways:
+    - edge-gateway
+  http:
+    - match:
+        - uri:
+            prefix: /api/orders
+      route:
+        - destination:
+            host: order-service.services.svc.cluster.local
+            port:
+              number: 3001

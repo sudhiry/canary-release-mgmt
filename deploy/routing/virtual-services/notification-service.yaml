@@ -1,0 +1,14 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: notification-service
+  namespace: services
+spec:
+  hosts:
+    - notification-service.services.svc.cluster.local
+  http:
+    - name: default
+      route:
+        - destination:
+            host: notification-service.services.svc.cluster.local
+            subset: stable

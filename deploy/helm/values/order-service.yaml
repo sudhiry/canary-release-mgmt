@@ -1,0 +1,13 @@
+serviceName: order-service
+ports:
+  http: 3001
+  restateHandler: 9084
+extraEnv:
+  INVENTORY_URL: http://inventory-service.services.svc.cluster.local:8082
+  PAYMENT_URL: http://payment-service.services.svc.cluster.local:8081
+  NOTIFICATION_URL: http://notification-service.services.svc.cluster.local:3002
+probes:
+  liveness:
+    path: /health
+  readiness:
+    path: /health

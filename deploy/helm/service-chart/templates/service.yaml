@@ -1,0 +1,20 @@
+{{- if eq (.Values.version | default "stable") "stable" -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.serviceName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Values.serviceName }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ .Values.serviceName }}
+  ports:
+    - name: http
+      port: {{ .Values.ports.http }}
+      targetPort: http
+    - name: restate
+      port: {{ .Values.ports.restateHandler }}
+      targetPort: restate
+{{- end }}

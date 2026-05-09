@@ -1,0 +1,14 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: inventory-service
+  namespace: services
+spec:
+  hosts:
+    - inventory-service.services.svc.cluster.local
+  http:
+    - name: default
+      route:
+        - destination:
+            host: inventory-service.services.svc.cluster.local
+            subset: stable

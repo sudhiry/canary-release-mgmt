@@ -1,0 +1,14 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: audit-service
+  namespace: services
+spec:
+  host: audit-service.services.svc.cluster.local
+  subsets:
+    - name: stable
+      labels:
+        version: stable
+    - name: canary
+      labels:
+        version: canary

@@ -49,6 +49,13 @@ describe("HTTP routes", () => {
     expect(res.body).toEqual({ error: "ingress_failed" });
   });
 
+  it("GET /health returns 200 with {ok: true}", async () => {
+    const app = setupHttp({ ingressClient: mockAxios() });
+    const res = await request(app).get("/health");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+  });
+
   it("GET /notifications/by-user/:userId reads store directly", async () => {
     notificationStore.put({ id: "n_1", userId: "u_42", message: "hi", status: "sent" });
     notificationStore.put({ id: "n_2", userId: "u_99", message: "ho", status: "sent" });

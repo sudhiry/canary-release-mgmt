@@ -96,4 +96,17 @@ describe("HTTP routes", () => {
 
     expect(res.status).toBe(404);
   });
+
+  it("GET /health returns 200 with {ok: true}", async () => {
+    const app = setupHttp({
+      clients: {
+        inventory: mockAxios(null),
+        payment: mockAxios(null),
+        notification: mockAxios(null),
+      },
+    });
+    const res = await request(app).get("/health");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+  });
 });

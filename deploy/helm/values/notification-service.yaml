@@ -1,0 +1,9 @@
+serviceName: notification-service
+ports:
+  http: 3002
+  restateHandler: 9085
+probes:
+  liveness:
+    path: /health
+  readiness:
+    path: /health

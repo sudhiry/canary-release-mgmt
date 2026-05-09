@@ -1,4 +1,4 @@
-.PHONY: help up down status smoke-infra dashboards dashboards-stop dashboards-status verify build-services clean
+.PHONY: help up down status smoke-infra dashboards dashboards-stop dashboards-status verify build-services build-images load-images images deploy-services undeploy-services smoke-services clean
 
 # Versions (pinned for reproducibility)
 KIND_CLUSTER_NAME := canary-release-mgmt
@@ -45,5 +45,22 @@ build-services: ## Compile all 5 service binaries (Java bootJars + Node tsc dist
 	@echo "==> Node services"
 	@pnpm --filter @canary/order-service build
 	@pnpm --filter @canary/notification-service build
+
+build-images: ## Build all 5 service docker images
+	@bash deploy/images/build-and-load.sh build
+
+load-images: ## Load all 5 service images into kind
+	@bash deploy/images/build-and-load.sh load
+
+images: build-images load-images ## Build then load all 5 images
+
+deploy-services: ## Apply KafkaTopics + Helm install all 5 + Istio routing
+	@bash deploy/services/deploy.sh
+
+undeploy-services: ## Remove routing, Helm releases, and KafkaTopics
+	@bash deploy/services/undeploy.sh
+
+smoke-services: ## Run service deployment smoke tests
+	@bats tests/services/deploy.bats
 
 clean: down ## Alias for down

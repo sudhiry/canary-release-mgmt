@@ -17,3 +17,14 @@ app:
       url: ${RESTATE_INGRESS_URL:http://localhost:9070}
     handler:
       port: ${RESTATE_HANDLER_PORT:9082}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never

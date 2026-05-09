@@ -1,0 +1,6 @@
+apiVersion: v2
+name: service-chart
+description: Shared chart for all 5 canary-release-mgmt services (stable + canary)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

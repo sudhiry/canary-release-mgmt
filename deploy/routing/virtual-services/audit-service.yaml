@@ -1,0 +1,14 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: audit-service
+  namespace: services
+spec:
+  hosts:
+    - audit-service.services.svc.cluster.local
+  http:
+    - name: default
+      route:
+        - destination:
+            host: audit-service.services.svc.cluster.local
+            subset: stable

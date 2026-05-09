@@ -1,0 +1,14 @@
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: payment-service
+  namespace: services
+spec:
+  host: payment-service.services.svc.cluster.local
+  subsets:
+    - name: stable
+      labels:
+        version: stable
+    - name: canary
+      labels:
+        version: canary
