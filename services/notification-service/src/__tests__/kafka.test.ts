@@ -30,19 +30,28 @@ describe("setupKafka", () => {
     consumerConnectMock.mockClear();
   });
 
-  it("connects producer always", async () => {
-    await setupKafka({ brokers: ["localhost:9092"], consumersEnabled: false });
+  it("connects producer when producerEnabled=true", async () => {
+    await setupKafka({ brokers: ["localhost:9092"], consumersEnabled: false, producerEnabled: true });
     expect(connectMock).toHaveBeenCalledOnce();
   });
 
+  it("does NOT connect producer when producerEnabled=false; send() is a no-op", async () => {
+    const kafka = await setupKafka({ brokers: ["localhost:9092"], consumersEnabled: false, producerEnabled: false });
+    expect(connectMock).not.toHaveBeenCalled();
+    expect(kafka.producer).toBeNull();
+
+    await kafka.send("notifications.events", "n_1", "{}");
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
   it("does NOT call consumer.subscribe / consumer.run when consumersEnabled=false", async () => {
-    await setupKafka({ brokers: ["localhost:9092"], consumersEnabled: false });
+    await setupKafka({ brokers: ["localhost:9092"], consumersEnabled: false, producerEnabled: true });
     expect(subscribeMock).not.toHaveBeenCalled();
     expect(runMock).not.toHaveBeenCalled();
   });
 
   it("subscribes to orders.events + payments.events when consumersEnabled=true", async () => {
-    await setupKafka({ brokers: ["localhost:9092"], consumersEnabled: true });
+    await setupKafka({ brokers: ["localhost:9092"], consumersEnabled: true, producerEnabled: true });
     expect(subscribeMock).toHaveBeenCalledWith({
       topics: ["orders.events", "payments.events"],
     });
@@ -50,7 +59,7 @@ describe("setupKafka", () => {
   });
 
   it("send() wraps records via stampXCanaryOnProducerRecord (calls producer.send)", async () => {
-    const kafka = await setupKafka({ brokers: ["localhost:9092"], consumersEnabled: false });
+    const kafka = await setupKafka({ brokers: ["localhost:9092"], consumersEnabled: false, producerEnabled: true });
     await kafka.send("notifications.events", "n_1", "{}");
 
     expect(sendMock).toHaveBeenCalledOnce();

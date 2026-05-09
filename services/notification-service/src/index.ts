@@ -15,6 +15,7 @@ app.listen(config.HTTP_PORT, () => {
 const kafka = await setupKafka({
   brokers: config.KAFKA_BOOTSTRAP_SERVERS,
   consumersEnabled: config.KAFKA_CONSUMERS_ENABLED,
+  producerEnabled: config.KAFKA_PRODUCER_ENABLED,
 });
 
 configureKafkaSend(kafka.send);
