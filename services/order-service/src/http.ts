@@ -6,6 +6,7 @@ import {
   xServedChainMiddleware,
   attachXCanaryAxiosInterceptor,
   attachXServedChainAxiosInterceptor,
+  type KafkaHealthState,
 } from "@canary/lib-node";
 import type { Order, OrderRequest } from "@canary/restate-defs-node";
 import { orderStore, consumedEventStore } from "./store.js";
@@ -15,6 +16,7 @@ import { randomUUID } from "node:crypto";
 export interface HttpDeps {
   clients: SagaClients;
   kafkaSend?: (topic: string, key: string, value: string) => Promise<void>;
+  kafkaHealth?: KafkaHealthState;
 }
 
 export function buildClient(baseURL: string): AxiosInstance {
@@ -27,7 +29,14 @@ export function buildClient(baseURL: string): AxiosInstance {
 export function setupHttp(deps: HttpDeps): Express {
   const app = express();
   app.use(express.json());
-  app.get("/health", (_req, res) => res.json({ ok: true }));
+  app.get("/health", (_req, res) => {
+    const report = deps.kafkaHealth?.report();
+    if (report && !report.ok) {
+      res.status(503).json({ ok: false, kafka: report });
+      return;
+    }
+    res.json({ ok: true });
+  });
   app.use(xCanaryMiddleware);
   app.use(xServedVersionMiddleware());
   app.use(xServedChainMiddleware());

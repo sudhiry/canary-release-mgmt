@@ -17,9 +17,9 @@ const kafka = await setupKafka({
   producerEnabled: config.KAFKA_PRODUCER_ENABLED,
 });
 
-const app = setupHttp({ clients, kafkaSend: kafka.send });
+const app = setupHttp({ clients, kafkaSend: kafka.send, kafkaHealth: kafka.health });
 
-app.listen(config.HTTP_PORT, () => {
+const server = app.listen(config.HTTP_PORT, () => {
   console.log(`order-service HTTP listening on ${config.HTTP_PORT}`);
 });
 
@@ -27,3 +27,13 @@ await setupRestate({
   registerHandlers: config.RESTATE_REGISTER_HANDLERS,
   port: config.RESTATE_HANDLER_PORT,
 });
+
+const shutdown = async () => {
+  console.log("order-service shutting down");
+  if (kafka.presenceWatcher) { try { kafka.presenceWatcher.close(); } catch { /* ignore */ } }
+  if (kafka.consumer) await kafka.consumer.disconnect().catch(() => {});
+  if (kafka.producer) await kafka.producer.disconnect().catch(() => {});
+  server.close();
+};
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
