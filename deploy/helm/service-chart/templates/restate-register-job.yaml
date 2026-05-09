@@ -31,14 +31,24 @@ spec:
               SVC="{{ .Values.serviceName }}.{{ .Release.Namespace }}.svc.cluster.local"
               RESTATE_PORT="{{ .Values.ports.restateHandler }}"
               ADMIN="{{ .Values.env.RESTATE_ADMIN_URL }}"
-              echo "Waiting for ${SVC}:${RESTATE_PORT}/discover ..."
-              # Restate SDK serves /discover (the OpenAPI-like discovery doc) once the handler endpoint is listening
-              until curl -sf -o /dev/null "http://${SVC}:${RESTATE_PORT}/discover"; do
+              BODY="{\"uri\":\"http://${SVC}:${RESTATE_PORT}\",\"force\":true}"
+              # Retry the registration POST directly. Restate Admin does the
+              # discovery dance internally (it knows the right Accept header
+              # version for the SDK manifest endpoint). A 2xx means the service
+              # is reachable AND discovery succeeded. We retry on any non-2xx,
+              # including transient connection failures while the service is
+              # still booting.
+              echo "Registering ${SVC}:${RESTATE_PORT} with Restate Admin at ${ADMIN}"
+              for i in $(seq 1 60); do
+                if curl -fs --max-time 5 -o /tmp/resp -X POST "${ADMIN}/deployments" \
+                     -H 'content-type: application/json' -d "${BODY}"; then
+                  echo "Registered."
+                  cat /tmp/resp
+                  exit 0
+                fi
+                echo "attempt ${i}/60 failed; sleeping 2s..."
                 sleep 2
               done
-              echo "Registering ${SVC}:${RESTATE_PORT} with Restate Admin at ${ADMIN}"
-              curl -sf -X POST "${ADMIN}/deployments" \
-                -H 'content-type: application/json' \
-                -d "{\"uri\":\"http://${SVC}:${RESTATE_PORT}\",\"force\":true}" \
-                && echo "Registered."
+              echo "registration timed out after 120s" >&2
+              exit 1
 {{- end }}
