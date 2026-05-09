@@ -151,6 +151,45 @@ void stop() throws Exception {
 
 The Java service `build.gradle.kts` must add `implementation(libs.vertx.core)` to make `io.vertx.core.http.HttpServer` compile-visible (it is otherwise only a transitive runtime dep of `restate-sdk-http-vertx`). The `gradle/libs.versions.toml` already has `vertx-core` registered (added in Task 6).
 
+### Restate Node SDK 1.14.2 deviations from the plan's example code (verified by Tasks 16-19)
+
+1. **`restate.service({ name, handlers: { notify } })` returns `ServiceDefinition` with `.service.notify`, not `.handlers.notify`.** When testing the handler directly, extract it as a top-level exported function and pass it into the service definition:
+   ```typescript
+   export async function notifyHandler(ctx: restate.Context, req: NotifyRequest): Promise<Notification> {
+     // ... handler body
+   }
+   export const notificationService = restate.service({
+     name: notificationServiceDef.name,
+     handlers: { notify: notifyHandler },
+   });
+   ```
+   Tests call `notifyHandler(mockCtx, req)` directly.
+
+2. **`ctx.request().headers` is `ReadonlyMap<string, string>`, not a plain object.** Use `.get("x-canary")` — bracket access fails:
+   ```typescript
+   const isCanary = ctx.request().headers.get("x-canary") === "true";
+   // Test mocks: { request: () => ({ headers: new Map([["x-canary", "true"]]) }) }
+   ```
+
+3. **`xCanaryMiddleware` from `@canary/lib-node` is a direct Express middleware function, not a factory.** Use `app.use(xCanaryMiddleware)` (no parens).
+
+4. **`ctx.serviceClient(def).method(input, opts)` requires `Opts` wrapper, not raw `ClientCallOptions`.** Use `restate.rpc.opts(applyXCanaryToRestateOptions({}))`:
+   ```typescript
+   await ctx.serviceClient(auditQueryServiceDef).append(
+     auditEvent,
+     restate.rpc.opts(applyXCanaryToRestateOptions({})),
+   );
+   // Tests: const sentOpts = mockAppend.mock.calls[0][1]; sentOpts.getOpts().headers["x-canary"] === "true"
+   ```
+
+5. **lib-node `dist/` is gitignored** (it's a build artifact). Before running Node service tests in a fresh checkout, build lib-node first:
+   ```bash
+   pnpm --filter @canary/lib-node build
+   ```
+   This produces `platform/lib-node/dist/` which the Node services consume via the `workspace:*` link.
+
+These deviations are verified working in notification-service (commits b991276, 5beae8f, fbad613, 12dd90b). Apply the same patterns in Tasks 20-23 (order-service).
+
 ### Spring Boot 4.0.4 deviations from the plan's example code (verified against 4.0.4 jars)
 
 These two changes are the same across all 3 Java service tasks (audit, payment, inventory) — apply them everywhere the plan's example uses the older patterns:
