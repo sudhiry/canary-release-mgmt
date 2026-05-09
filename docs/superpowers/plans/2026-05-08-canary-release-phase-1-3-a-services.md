@@ -176,7 +176,16 @@ These two changes are the same across all 3 Java service tasks (audit, payment, 
    ```
    Drop `@MockitoBean` (replace with plain `@Mock`); use `MockitoExtension` + `MockMvcBuilders.standaloneSetup`.
 
-2. **`RestClientAutoConfiguration` was removed** from `spring-boot-autoconfigure-4.0.4.jar` — `RestClient.Builder` is NOT an autowire-able bean. Each service's `IngressClientConfig` must use `RestClient.builder()` (static factory) and manually apply `Consumer<RestClient.Builder>` customizers (which include the lib-java x-canary customizer):
+2. **`KafkaAutoConfiguration` was removed** from `spring-boot-autoconfigure-4.0.4.jar` (and not relocated to spring-kafka). The plan's consumer-gating tests load Kafka auto-config — drop that. The gating test only needs to verify `@ConditionalOnProperty` filters the bean in/out:
+   ```java
+   private final ApplicationContextRunner runner = new ApplicationContextRunner()
+       .withUserConfiguration(TestStubs.class, XKafkaListener.class);
+   // No .withConfiguration(AutoConfigurations.of(KafkaAutoConfiguration.class)) — removed in SB4.
+   // No spring.kafka.bootstrap-servers property either — no Kafka infra wired in this test.
+   ```
+   These tests only verify `assertThat(ctx).hasSingleBean(XKafkaListener.class)` vs `doesNotHaveBean(...)` based on the gating flag. Real Kafka wiring is tested at runtime, not here.
+
+3. **`RestClientAutoConfiguration` was removed** from `spring-boot-autoconfigure-4.0.4.jar` — `RestClient.Builder` is NOT an autowire-able bean. Each service's `IngressClientConfig` must use `RestClient.builder()` (static factory) and manually apply `Consumer<RestClient.Builder>` customizers (which include the lib-java x-canary customizer):
    ```java
    @Bean
    public RestClient ingressRestClient(

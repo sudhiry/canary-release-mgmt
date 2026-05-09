@@ -2,31 +2,46 @@ package com.canary.audit.handler;
 
 import com.canary.audit.store.AuditEventStore;
 import com.canary.restate.audit.AuditEvent;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.kafka.core.KafkaTemplate;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 class AuditQueryServiceImplTest {
 
     AuditEventStore store;
+    @SuppressWarnings("unchecked")
+    KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
+    ObjectMapper objectMapper = new ObjectMapper();
     AuditQueryServiceImpl handler;
 
     @BeforeEach
     void setUp() {
         store = new AuditEventStore();
-        handler = new AuditQueryServiceImpl(store);
+        handler = new AuditQueryServiceImpl(store, kafkaTemplate, objectMapper);
     }
 
     @Test
-    void appendStoresTheEvent() {
+    void appendStoresAndEmitsKafka() throws Exception {
         var event = new AuditEvent("ord_1", "evt_1", "created", null);
 
         handler.append(event);
 
         assertThat(store.all()).containsExactly(event);
+
+        var keyCap = ArgumentCaptor.forClass(String.class);
+        var valueCap = ArgumentCaptor.forClass(String.class);
+        verify(kafkaTemplate).send(eq("audit.events"), keyCap.capture(), valueCap.capture());
+        assertThat(keyCap.getValue()).isEqualTo("evt_1");
+        assertThat(objectMapper.readValue(valueCap.getValue(), AuditEvent.class)).isEqualTo(event);
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.canary.audit.config;
 
 import com.canary.audit.handler.AuditQueryServiceImpl;
 import com.canary.audit.store.AuditEventStore;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.restate.sdk.endpoint.Endpoint;
 import dev.restate.sdk.http.vertx.RestateHttpServer;
 import io.vertx.core.http.HttpServer;
@@ -11,6 +12,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.core.KafkaTemplate;
 
 @Configuration
 @ConditionalOnProperty(
@@ -31,8 +33,12 @@ public class RestateEndpointConfig {
     }
 
     @Bean
-    public static AuditQueryServiceImpl auditQueryServiceImpl(AuditEventStore store) {
-        return new AuditQueryServiceImpl(store);
+    public static AuditQueryServiceImpl auditQueryServiceImpl(
+            AuditEventStore store,
+            KafkaTemplate<String, String> kafkaTemplate,
+            ObjectMapper objectMapper
+    ) {
+        return new AuditQueryServiceImpl(store, kafkaTemplate, objectMapper);
     }
 
     @PostConstruct
