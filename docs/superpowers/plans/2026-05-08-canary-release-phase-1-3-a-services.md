@@ -96,14 +96,16 @@ The SDK suggests this canonical fix:
 // REJECTED in SDK 2.7 reflection API:
 public abstract void append(Context ctx, AuditEvent event) { ... }
 
-// ACCEPTED — drop Context from signature; access it via the public static accessor:
+// ACCEPTED — drop Context from signature; access it via Context.current() (cast for VO/Workflow):
 public abstract void append(AuditEvent event) {
-    var ctx = dev.restate.sdk.Restate.context();   // for plain @Service
-    // OR: dev.restate.sdk.Restate.objectContext() for @VirtualObject
-    // OR: dev.restate.sdk.Restate.workflowContext() for @Workflow
+    Context ctx = Context.current();                        // for plain @Service
+    // OR: ObjectContext ctx = (ObjectContext) Context.current();   for @VirtualObject
+    // OR: WorkflowContext ctx = (WorkflowContext) Context.current();  for @Workflow
     // ... handler body uses ctx for ctx.call(...), ctx.set(STATE,...), etc.
 }
 ```
+
+(`dev.restate.sdk.Restate.objectContext()` etc. **do not exist** in SDK 2.7 — Task 6 docs initially suggested them but the verified accessor is `Context.current()` from `dev.restate.sdk.Context`, with a cast for the typed subclasses.)
 
 **Apply this everywhere the plan shows Context-as-first-parameter** (Tasks 6, 10, 14, 18, 22). The abstract classes in `platform/restate-defs-java` (Task 1) drop Context from method signatures; implementations and tests follow.
 
@@ -114,22 +116,20 @@ import dev.restate.common.Request;
 import dev.restate.common.Target;
 import dev.restate.serde.TypeTag;
 
-var ctx = Restate.context();   // or objectContext() / workflowContext() per primitive
-var opts = canaryCustomizer.apply(InvocationOptions.builder());   // x-canary stamp from XCanaryContext
+Context ctx = Context.current();   // (cast to ObjectContext / WorkflowContext for keyed primitives)
+InvocationOptions opts = canaryCustomizer.apply(InvocationOptions.builder());   // x-canary stamp
 var req = Request.of(
-        Target.service("AuditQueryService", "append"),    // for @Service
+        Target.service("AuditQueryService", "append"),    // for @Service — verified in SDK 2.7
         // OR: Target.virtualObject("PaymentVO", orderId, "charge") for @VirtualObject keyed call
         // OR: Target.workflow("CheckoutSaga", workflowId, "run") for @Workflow keyed call
         TypeTag.of(AuditEvent.class),
         TypeTag.of(Void.class),
         new AuditEvent(...)
-    ).toBuilder()
-    .headers(opts.getHeaders())
-    .build();
-ctx.call(req);   // or ctx.send(req) for fire-and-forget
+    ).headers(opts.getHeaders());          // Request.of(...) returns RequestBuilder which IS-A Request
+ctx.call(req);                              // or ctx.send(req) for fire-and-forget
 ```
 
-The exact `Target.service(...)` / `Target.virtualObject(...)` / `Target.workflow(...)` factory names should be verified against `dev.restate.common.Target` in your SDK build (probe with `javap -public dev.restate.common.Target`). Adjust if signatures differ — preserve the structural intent: stamp x-canary onto the Request's headers via `XCanaryRestateClientCustomizer.apply(InvocationOptions.builder())`.
+Verified in SDK 2.7 by Task 10: `Target.service(name, handler)` and `Target.virtualObject(name, key, handler)` exist with these signatures. `Request.of(...)` returns `RequestBuilder` (which extends `Request`), so `.headers(map)` is callable directly without `.toBuilder().build()`.
 
 **RestateHttpServer + Endpoint API** — the plan's `RestateHttpServer.fromEndpoint(Endpoint.builder().bind(handler).build())` is correct, but `RestateHttpServer.fromEndpoint(Endpoint)` returns `io.vertx.core.http.HttpServer` (a vertx type, not a Restate type). Listening + closing are async vertx Futures:
 
