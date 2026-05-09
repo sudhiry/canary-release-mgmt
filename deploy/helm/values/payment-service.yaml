@@ -1,0 +1,16 @@
+serviceName: payment-service
+ports:
+  http: 8081
+  restateHandler: 9081
+probes:
+  liveness:
+    path: /actuator/health/liveness
+  readiness:
+    path: /actuator/health/readiness
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 512Mi
