@@ -7,6 +7,7 @@ import com.canary.platform.lib.XCanaryRestateClientCustomizer;
 import com.canary.restate.audit.AuditEvent;
 import com.canary.restate.inventory.Reservation;
 import com.canary.restate.inventory.ReservationRequest;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.restate.common.Request;
 import dev.restate.sdk.CallDurableFuture;
 import dev.restate.sdk.WorkflowContext;
@@ -15,9 +16,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.kafka.core.KafkaTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -26,6 +29,9 @@ class ReservationWorkflowImplTest {
 
     ReservationStore store;
     XCanaryRestateClientCustomizer canary;
+    @SuppressWarnings("unchecked")
+    KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
+    ObjectMapper objectMapper = new ObjectMapper();
     ReservationWorkflowImpl handler;
     WorkflowContext ctx;
 
@@ -33,7 +39,7 @@ class ReservationWorkflowImplTest {
     void setUp() {
         store = new ReservationStore();
         canary = new XCanaryRestateClientCustomizer();
-        handler = new ReservationWorkflowImpl(store, canary);
+        handler = new ReservationWorkflowImpl(store, canary, kafkaTemplate, objectMapper);
         ctx = mock(WorkflowContext.class);
         // Install the mock WorkflowContext into the Restate thread-local so Context.current()
         // returns it when handler.run() calls (WorkflowContext) Context.current().
@@ -85,5 +91,19 @@ class ReservationWorkflowImplTest {
         Request<?, ?> sentReq = reqCap.getValue();
         assertThat(sentReq.getHeaders())
             .containsEntry(XCanaryConstants.HEADER_NAME, XCanaryConstants.TRUE_VALUE);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void runEmitsInventoryEvent() throws Exception {
+        when(ctx.call(any(Request.class))).thenReturn(mock(CallDurableFuture.class));
+
+        Reservation result = handler.run(new ReservationRequest("SKU-A", 5, "ord_42"));
+
+        var keyCap = ArgumentCaptor.forClass(String.class);
+        var valueCap = ArgumentCaptor.forClass(String.class);
+        verify(kafkaTemplate).send(eq("inventory.events"), keyCap.capture(), valueCap.capture());
+        assertThat(keyCap.getValue()).isEqualTo(result.id());
+        assertThat(objectMapper.readValue(valueCap.getValue(), Reservation.class)).isEqualTo(result);
     }
 }

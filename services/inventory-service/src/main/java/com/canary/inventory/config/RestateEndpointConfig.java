@@ -3,6 +3,7 @@ package com.canary.inventory.config;
 import com.canary.inventory.handler.ReservationWorkflowImpl;
 import com.canary.inventory.store.ReservationStore;
 import com.canary.platform.lib.XCanaryRestateClientCustomizer;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.restate.sdk.endpoint.Endpoint;
 import dev.restate.sdk.http.vertx.RestateHttpServer;
 import io.vertx.core.http.HttpServer;
@@ -12,6 +13,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.core.KafkaTemplate;
 
 /**
  * Starts the Restate HTTP endpoint for the ReservationWorkflow handler.
@@ -40,9 +42,11 @@ public class RestateEndpointConfig {
     @Bean
     public static ReservationWorkflowImpl reservationWorkflowImpl(
             ReservationStore store,
-            XCanaryRestateClientCustomizer canary
+            XCanaryRestateClientCustomizer canary,
+            KafkaTemplate<String, String> kafkaTemplate,
+            ObjectMapper objectMapper
     ) {
-        return new ReservationWorkflowImpl(store, canary);
+        return new ReservationWorkflowImpl(store, canary, kafkaTemplate, objectMapper);
     }
 
     @PostConstruct
