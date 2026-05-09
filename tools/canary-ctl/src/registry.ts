@@ -30,12 +30,12 @@ function entry(name: string): ServiceEntry {
   };
 }
 
-export const REGISTRY: Record<string, ServiceEntry> = Object.fromEntries(
+export const REGISTRY: Record<typeof SERVICES[number], ServiceEntry> = Object.fromEntries(
   SERVICES.map((s) => [s, entry(s)]),
-);
+) as Record<typeof SERVICES[number], ServiceEntry>;
 
 export function lookup(svc: string): ServiceEntry {
-  const e = REGISTRY[svc];
+  const e = (REGISTRY as Record<string, ServiceEntry | undefined>)[svc];
   if (!e) {
     const known = Object.keys(REGISTRY).sort().join(", ");
     throw new Error(`unknown service: ${svc} (known: ${known})`);

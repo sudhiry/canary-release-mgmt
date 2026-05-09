@@ -35,4 +35,9 @@ describe("registry", () => {
       /unknown service: not-a-real-service/i,
     );
   });
+
+  it("lookup is case-sensitive", () => {
+    expect(() => lookup("Payment-Service")).toThrow(/unknown service/i);
+    expect(() => lookup("PAYMENT-SERVICE")).toThrow(/unknown service/i);
+  });
 });
