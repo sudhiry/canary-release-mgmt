@@ -52,7 +52,7 @@ The following are settled before this design and not revisited:
 - **Per-message filter logic**:
   - Stable: process if `x-canary != "true"` OR `canaryReady == false`. Skip otherwise.
   - Canary: process if `x-canary == "true"`. Skip otherwise.
-- **Presence detection: k8s API watch on the canary subset's `EndpointSlice`.** Push-based, ~1s detection. In-memory atomic flag updated by watch events. Hot-path filter is O(1).
+- **Presence detection: k8s API watch on `Pods` with label selector `app=<svc>,version=canary`.** Push-based, ~1s detection. In-memory atomic flag updated by watch events. Hot-path filter is O(1). (Initial design considered EndpointSlice but the Phase 1 per-service Service selects both subsets, so its slice mixes them; Pod-level watch is simpler.)
 - **Canary readiness gating**: canary pod's readiness probe returns 200 only if (HTTP server up) AND (Kafka consumer is connected and last poll within `KAFKA_HEALTH_TIMEOUT` seconds, default 30). Liveness probe is NOT gated on Kafka — let the pod stay alive and reconnect.
 - **Race window during canary becoming Ready**: accepted. Brief duplicate processing (sub-second) is documented; downstream handlers must be idempotent. Covered by the existing Phase 1 substrate (Restate and most downstreams already idempotent).
 - **Header propagation into Kafka consume context**: each consume callback opens a `runWithCanary(headerValue, () => handler())` frame (same primitive as Phase 1's HTTP middleware, just triggered by the consume callback instead of HTTP). Outbound HTTP/Kafka/Restate calls inherit `x-canary` via existing Phase 1 interceptors.
@@ -105,24 +105,24 @@ export function shouldProcess(kafkaHeaders: IHeaders | undefined, ownVersion: st
 
 Each service wraps its consume callback to gate on `shouldProcess`. Plan 2.b applies the wrapping; Plan 2.a only ships the helpers.
 
-### XCanaryPresenceWatcher — k8s EndpointSlice watch
+### XCanaryPresenceWatcher — k8s Pod watch
 
 The presence watcher is a singleton per service that:
 
 1. Reads the k8s service-account credentials from `/var/run/secrets/kubernetes.io/serviceaccount/`
 2. Connects to the in-cluster Kubernetes API server (`https://kubernetes.default.svc`)
-3. Opens a long-lived `watch` on `EndpointSlice` resources matching label `kubernetes.io/service-name=<svc>` (where `<svc>` is e.g. `payment-service`)
-4. For each watch event, inspects the EndpointSlice's `endpoints` list:
-   - For each endpoint with `targetRef.labels.version == "canary"` AND `conditions.ready == true` → counts as a Ready canary endpoint
-   - If at least one Ready canary endpoint exists → set `canaryReady = true`
+3. Opens a long-lived `watch` on `Pods` in the service's namespace with label selector `app=<svc>,version=canary` (where `<svc>` is e.g. `payment-service`)
+4. For each watch event, inspects the Pod's `status.conditions`:
+   - If at least one matching pod has `conditions[type=Ready].status == "True"` → set `canaryReady = true`
    - Else → set `canaryReady = false`
 5. Maintains the watch indefinitely; on disconnect, reconnects with exponential backoff (initial 1s, max 30s)
 6. Exposes `boolean isCanaryReady()` for the consume filter
 
-The reason we watch EndpointSlice (not Deployment or Pods directly):
-- EndpointSlice is the same source of truth Istio uses for subset routing (consistency with existing Phase 1 routing decisions)
-- Per-pod readiness is reflected here (a Deployment's `readyReplicas` is coarser)
-- One object to watch per service (Pod-level watch would be one watch per pod)
+Why Pod-level watch (not EndpointSlice or Deployment):
+- The Phase 1 per-service Service selects both stable + canary subsets (`app=<svc>` only), so its EndpointSlice mixes both — we can't filter by version without extra lookups
+- Watching Pods with `version=canary` selector gives us exactly the canary subset's readiness in one stream
+- Per-pod granularity matches what we actually care about (any Ready canary pod = canary present)
+- Single watch per service (one stream per stable pod, watching ≤2 canary pod objects in steady state)
 
 **Java implementation**: Uses Kubernetes Java client (`io.kubernetes:client-java`) — already a transitive dep of Spring Boot for some integrations; standalone if not. Lightweight enough for the foundation.
 
@@ -171,7 +171,7 @@ Node equivalent: `runWithCanaryFromHeaders(kafkaHeaders, () => handler())` using
 
 The k8s API watch needs:
 - `ServiceAccount` (already exists per Plan 1.3.b)
-- `Role` granting `get` and `watch` on `endpointslices` in the service's namespace
+- `Role` granting `get`, `list`, `watch` on `pods` in the service's namespace
 - `RoleBinding` linking the SA to the Role
 
 New chart template `deploy/helm/service-chart/templates/role.yaml`:
@@ -184,8 +184,8 @@ metadata:
   name: {{ include "service-chart.resourceName" . }}-canary-watch
   namespace: {{ .Release.Namespace }}
 rules:
-  - apiGroups: ["discovery.k8s.io"]
-    resources: ["endpointslices"]
+  - apiGroups: [""]
+    resources: ["pods"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -319,7 +319,7 @@ After 2.a merges + image rebuild + redeploy:
 
 ```bash
 # 1. Verify stable pod's RBAC works
-kubectl auth can-i watch endpointslices -n services --as=system:serviceaccount:services:payment-service
+kubectl auth can-i watch pods -n services --as=system:serviceaccount:services:payment-service
 # Expected: yes
 
 # 2. Verify lib-java HealthIndicator surfaces (no Kafka consumer wired yet, so check just /actuator/health structure)
@@ -346,7 +346,7 @@ make build-images && make load-images               # refresh images
 make deploy-services                                # apply Helm chart (now includes Role + RoleBinding)
 
 # Smoke check RBAC:
-kubectl auth can-i watch endpointslices -n services --as=system:serviceaccount:services:payment-service
+kubectl auth can-i watch pods -n services --as=system:serviceaccount:services:payment-service
 ```
 
 The behavior of the cluster does not change. No new e2e scenarios pass or fail — we just have new lib code + RBAC sitting unused. Plan 2.b consumes it.
@@ -363,7 +363,7 @@ The behavior of the cluster does not change. No new e2e scenarios pass or fail �
 
 - The kind cluster's k8s API server is reachable from in-cluster pods via the standard `https://kubernetes.default.svc` endpoint with the auto-mounted ServiceAccount token. (True for standard kind setup.)
 - Strimzi's KafkaTopic CRDs already create the topics; per-subset consumer groups are created on first consumer poll (Kafka auto-creates groups). No new KafkaTopic CRDs needed in 2.a.
-- The `discovery.k8s.io/v1` EndpointSlice API is available (yes — Kubernetes 1.21+).
+- The core `v1` Pod API is available (universally true in Kubernetes 1.x).
 - `fabric8 kubernetes-client` works with Spring Boot 4 + Java 25 (verify during implementation; fall back to `io.kubernetes:client-java` if incompatible).
 - `@kubernetes/client-node` works with Node 25 ESM (it does; standard).
 - The 100–500ms canary-becoming-Ready race window is tolerated by downstream handlers. If downstream handlers prove non-idempotent during 2.b validation, the design adds a startup gate (canary consumer pauses until pod is Ready).
