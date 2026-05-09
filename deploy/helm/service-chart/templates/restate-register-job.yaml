@@ -1,0 +1,44 @@
+{{- if .Values.restate.registerEndpoint }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: register-restate-{{ .Values.serviceName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Values.serviceName }}
+    component: restate-register
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: hook-succeeded,before-hook-creation
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.serviceName }}
+        component: restate-register
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: register
+          image: curlimages/curl:8.10.1
+          command:
+            - sh
+            - -c
+            - |
+              set -eu
+              SVC="{{ .Values.serviceName }}.{{ .Release.Namespace }}.svc.cluster.local"
+              RESTATE_PORT="{{ .Values.ports.restateHandler }}"
+              ADMIN="{{ .Values.env.RESTATE_ADMIN_URL }}"
+              echo "Waiting for ${SVC}:${RESTATE_PORT}/discover ..."
+              # Restate SDK serves /discover (the OpenAPI-like discovery doc) once the handler endpoint is listening
+              until curl -sf -o /dev/null "http://${SVC}:${RESTATE_PORT}/discover"; do
+                sleep 2
+              done
+              echo "Registering ${SVC}:${RESTATE_PORT} with Restate Admin at ${ADMIN}"
+              curl -sf -X POST "${ADMIN}/deployments" \
+                -H 'content-type: application/json' \
+                -d "{\"uri\":\"http://${SVC}:${RESTATE_PORT}\",\"force\":true}" \
+                && echo "Registered."
+{{- end }}
