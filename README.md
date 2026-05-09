@@ -242,3 +242,40 @@ This doubles as coverage for the umbrella spec's S5 (no-canary graceful fallback
 | `restate-admin.ts` | axios `GET :9070/deployments` and `/services`. (Used by S11 in 1.5.b.) |
 
 Next phase: 1.5.b (12 remaining scenarios S2–S13).
+
+## Plan 1.5.b — 12 remaining e2e scenarios (S2–S13) (complete)
+
+Phase 1 is now complete. All 13 canonical acceptance scenarios from the umbrella spec are implemented as separate vitest files in `tests/e2e/`.
+
+### Quickstart
+
+```bash
+make up && make build-services && make build-images && make load-images && make deploy-services
+make e2e                                                  # run all 13 (~15 min)
+make ci-local                                             # fast subset: S1, S2, S5, S8, S9, S12 (~5 min)
+make e2e SCENARIO=s7                                      # run one
+```
+
+### Scenario coverage
+
+| # | Name | What it asserts |
+|---|---|---|
+| S1 | Baseline | All-stable cluster: no-header AND header request both 2xx + `x-served-version: stable` |
+| S2 | Single-service canary | Canary on payment → chain shows `payment-service=canary`, others stable |
+| S3 | Multi-service canary | Canary on order + inventory → both `=canary`, others stable |
+| S4 | Full-chain canary | Canary on all 5 → every chain entry `=canary` |
+| S5 | No-canary fallback | Header request with no canary → stable serves |
+| S6 | Canary unhealthy | Bad image tag → auto-rollback fires; final state clean |
+| S7 | Stable undisrupted | p99 stable load during canary deploy ≤ 1.5× baseline |
+| S8 | Header propagation completeness | Chain contains all 5 services (every internal hop reached) |
+| S9 | Header leak prevention | No-header request: no canary pod logs the user ID |
+| S10 | Kafka isolation | Canary pods don't join Kafka consumer groups |
+| S11 | Restate isolation | Canary pods don't register with Restate Admin |
+| S12 | Rollback | Deploy + rollback → cluster fully clean |
+| S13 | Partial-state recovery | Manual VS rule deletion → `canary-ctl reconcile` repairs |
+
+### Per-hop chain (`x-served-chain` header)
+
+Each service stamps `<svc>=<version>` and prepends downstream service tokens captured via the axios/RestClient response interceptor. Tests parse the comma-separated chain to verify multi-hop routing without needing Jaeger.
+
+Phase 1 is complete. Next: Phase 2 (Kafka canary consumer strategies).

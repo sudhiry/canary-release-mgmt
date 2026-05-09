@@ -5,3 +5,6 @@ export * from "./x-canary-axios.js";
 export * from "./x-canary-kafka.js";
 export * from "./x-canary-restate.js";
 export * from "./x-served-version-middleware.js";
+export * from "./x-served-chain-context.js";
+export * from "./x-served-chain-middleware.js";
+export * from "./x-served-chain-axios.js";
