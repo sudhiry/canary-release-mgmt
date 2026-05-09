@@ -224,15 +224,15 @@ git commit -m "feat(services): expose actuator health/liveness and health/readin
 
 - [ ] **Step 1: Write the failing test**
 
-In `services/order-service/src/__tests__/http.test.ts`, add a new `describe` block (or new `it` inside the existing `describe("HTTP routes", ...)`) — pick whichever sits next to the other route tests. Add this test:
+In `services/order-service/src/__tests__/http.test.ts`, add this test inside the existing `describe("HTTP routes", ...)` block, alongside the other route tests. Use the existing `mockAxios(null)` helper (defined at the top of the file) for consistency with the other tests that don't exercise the clients:
 
 ```typescript
   it("GET /health returns 200 with {ok: true}", async () => {
     const app = setupHttp({
       clients: {
-        inventory: { post: () => Promise.reject() } as unknown as AxiosInstance,
-        payment: { post: () => Promise.reject() } as unknown as AxiosInstance,
-        notification: { post: () => Promise.reject() } as unknown as AxiosInstance,
+        inventory: mockAxios(null),
+        payment: mockAxios(null),
+        notification: mockAxios(null),
       },
     });
     const res = await request(app).get("/health");
@@ -249,10 +249,12 @@ Expected: the new test fails with a 404 or similar (the route doesn't exist yet)
 
 - [ ] **Step 3: Add the /health route to setupHttp**
 
-In `services/order-service/src/http.ts`, inside the `setupHttp` function, immediately after `app.use(xCanaryMiddleware);` (and before any other route registration), add:
+In `services/order-service/src/http.ts`, inside the `setupHttp` function, register `/health` **BEFORE** `app.use(xCanaryMiddleware);` (immediately after `app.use(express.json());`). This keeps the k8s probe path infrastructure-transparent — it does not pass through the canary header propagation middleware (probes carry no `x-canary` header and shouldn't trigger ALS context creation):
 
 ```typescript
+  app.use(express.json());
   app.get("/health", (_req, res) => res.json({ ok: true }));
+  app.use(xCanaryMiddleware);
 ```
 
 - [ ] **Step 4: Run tests to confirm they pass**
@@ -278,7 +280,7 @@ git commit -m "feat(order-service): add GET /health route for k8s probes"
 
 - [ ] **Step 1: Write the failing test**
 
-In `services/notification-service/src/__tests__/http.test.ts`, add this test alongside the other route tests in the existing `describe` block:
+In `services/notification-service/src/__tests__/http.test.ts`, add this test alongside the other route tests in the existing `describe` block. Use the same mock pattern that other tests in that file use for unused clients (inspect the file first; if a `mockAxios()` helper exists, prefer it for consistency):
 
 ```typescript
   it("GET /health returns 200 with {ok: true}", async () => {
@@ -291,6 +293,8 @@ In `services/notification-service/src/__tests__/http.test.ts`, add this test alo
   });
 ```
 
+If the file has a `mockAxios()` helper (similar to order-service's), substitute `ingressClient: mockAxios(null)` for the inline `Promise.reject()` form.
+
 - [ ] **Step 2: Run the test to confirm it fails**
 
 Run: `pnpm --filter @canary/notification-service test`
@@ -299,10 +303,12 @@ Expected: the new test fails.
 
 - [ ] **Step 3: Add the /health route**
 
-In `services/notification-service/src/http.ts`, inside `setupHttp`, immediately after `app.use(xCanaryMiddleware);` and before any other route, add:
+In `services/notification-service/src/http.ts`, inside `setupHttp`, register `/health` **BEFORE** `app.use(xCanaryMiddleware);` (immediately after `app.use(express.json());`). This keeps the k8s probe path infrastructure-transparent — it does not pass through the canary header propagation middleware:
 
 ```typescript
+  app.use(express.json());
   app.get("/health", (_req, res) => res.json({ ok: true }));
+  app.use(xCanaryMiddleware);
 ```
 
 - [ ] **Step 4: Run tests to confirm they pass**
