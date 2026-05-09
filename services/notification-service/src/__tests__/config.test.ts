@@ -7,6 +7,7 @@ describe("loadConfig", () => {
     expect(cfg.HTTP_PORT).toBe(3002);
     expect(cfg.KAFKA_BOOTSTRAP_SERVERS).toEqual(["localhost:9092"]);
     expect(cfg.KAFKA_CONSUMERS_ENABLED).toBe(true);
+    expect(cfg.KAFKA_PRODUCER_ENABLED).toBe(true);
     expect(cfg.RESTATE_REGISTER_HANDLERS).toBe(true);
     expect(cfg.RESTATE_INGRESS_URL).toBe("http://localhost:9070");
     expect(cfg.RESTATE_HANDLER_PORT).toBe(9085);
@@ -15,6 +16,11 @@ describe("loadConfig", () => {
   it("treats KAFKA_CONSUMERS_ENABLED=false as false", () => {
     const cfg = loadConfig({ KAFKA_CONSUMERS_ENABLED: "false" });
     expect(cfg.KAFKA_CONSUMERS_ENABLED).toBe(false);
+  });
+
+  it("treats KAFKA_PRODUCER_ENABLED=false as false", () => {
+    const cfg = loadConfig({ KAFKA_PRODUCER_ENABLED: "false" });
+    expect(cfg.KAFKA_PRODUCER_ENABLED).toBe(false);
   });
 
   it("treats RESTATE_REGISTER_HANDLERS=false as false", () => {

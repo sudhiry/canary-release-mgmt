@@ -5,10 +5,11 @@ import { consumedEventStore } from "./store.js";
 export interface KafkaSetupOptions {
   brokers: string[];
   consumersEnabled: boolean;
+  producerEnabled: boolean;
 }
 
 export interface KafkaHandle {
-  producer: Producer;
+  producer: Producer | null;
   consumer: Consumer | null;
   send: (topic: string, key: string, value: string) => Promise<void>;
 }
@@ -16,16 +17,23 @@ export interface KafkaHandle {
 export async function setupKafka(opts: KafkaSetupOptions): Promise<KafkaHandle> {
   const kafka = new Kafka({ clientId: "notification-service", brokers: opts.brokers });
 
-  const producer = kafka.producer();
-  await producer.connect();
-
-  const send = async (topic: string, key: string, value: string): Promise<void> => {
-    const record = stampXCanaryOnProducerRecord({
-      topic,
-      messages: [{ key, value }],
-    });
-    await producer.send(record);
-  };
+  let producer: Producer | null = null;
+  let send: KafkaHandle["send"];
+  if (opts.producerEnabled) {
+    producer = kafka.producer();
+    await producer.connect();
+    const p = producer;
+    send = async (topic, key, value) => {
+      const record = stampXCanaryOnProducerRecord({
+        topic,
+        messages: [{ key, value }],
+      });
+      await p.send(record);
+    };
+  } else {
+    console.log("KAFKA_PRODUCER_ENABLED=false; producer not started; send() is a no-op");
+    send = async () => {};
+  }
 
   let consumer: Consumer | null = null;
   if (opts.consumersEnabled) {
