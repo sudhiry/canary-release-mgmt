@@ -8,3 +8,8 @@ export * from "./x-served-version-middleware.js";
 export * from "./x-served-chain-context.js";
 export * from "./x-served-chain-middleware.js";
 export * from "./x-served-chain-axios.js";
+export * from "./x-canary-consumer-group.js";
+export * from "./x-canary-consume-filter.js";
+export * from "./x-canary-consume-context.js";
+export * from "./x-canary-presence-watcher.js";
+export * from "./kafka-consumer-health.js";

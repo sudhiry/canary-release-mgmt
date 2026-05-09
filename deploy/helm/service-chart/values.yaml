@@ -43,6 +43,9 @@ resources:
     cpu: 500m
     memory: 256Mi
 
+canaryWatch:
+  enabled: true
+
 # Whether to render the post-install Restate-registration Job (canary skips)
 restate:
   registerEndpoint: true

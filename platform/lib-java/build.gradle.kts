@@ -5,9 +5,12 @@ plugins {
 dependencies {
     api(libs.spring.boot.autoconfigure)
     api(libs.spring.boot.starter.web)
+    api(libs.spring.boot.starter.actuator)
     api(libs.spring.kafka)
     api(libs.restate.sdk.api)
     api(libs.restate.sdk.common)
+
+    implementation("io.fabric8:kubernetes-client:7.4.0")
 
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.junit.jupiter)
