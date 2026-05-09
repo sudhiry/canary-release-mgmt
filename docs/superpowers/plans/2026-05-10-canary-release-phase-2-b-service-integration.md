@@ -134,10 +134,12 @@ Add these four tests to `AuditKafkaListenerGatingTest.java` (in addition to the 
 import com.canary.platform.lib.KafkaConsumerHealthIndicator;
 import com.canary.platform.lib.XCanaryConsumeFilter;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.header.internals.RecordHeaders;
+import org.apache.kafka.common.record.TimestampType;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 // Inside class body, additional tests:
@@ -180,13 +182,12 @@ void filterAcceptStoresEvent() {
 }
 
 @Test
-void canaryHeaderSetsContextDuringHandler() {
+void canaryHeaderIsPersistedToStoredEvent() {
     runner.run(ctx -> {
         AuditKafkaListener listener = ctx.getBean(AuditKafkaListener.class);
         AtomicBoolean shouldProcess = ctx.getBean("shouldProcessFlag", AtomicBoolean.class);
         shouldProcess.set(true);
         listener.onMessage(record("orders.events", "k2", "v2", true));
-        // Verify last recorded event captured x-canary=true header
         ConsumedEventStore store = ctx.getBean(ConsumedEventStore.class);
         var last = store.all().get(store.all().size() - 1);
         assertThat(last.headers().get("x-canary")).isEqualTo("true");
@@ -195,11 +196,16 @@ void canaryHeaderSetsContextDuringHandler() {
 
 private static ConsumerRecord<String, String> record(String topic, String key, String value, boolean canary) {
     RecordHeaders headers = new RecordHeaders();
-    if (canary) headers.add(new RecordHeader("x-canary", "true".getBytes()));
+    if (canary) headers.add(new RecordHeader("x-canary", "true".getBytes(StandardCharsets.UTF_8)));
     return new ConsumerRecord<>(topic, 0, 0L, 0L,
-            org.apache.kafka.common.record.TimestampType.NO_TIMESTAMP_TYPE,
-            -1, -1, key, value, headers, java.util.Optional.empty());
+            TimestampType.NO_TIMESTAMP_TYPE, -1, -1, key, value, headers, Optional.empty());
 }
+```
+
+Note: the existing `runner` field has a stale Javadoc claiming the test only verifies @ConditionalOnProperty. After these additions that's no longer accurate. Replace the Javadoc with a single-line comment or delete it entirely:
+
+```java
+// No Kafka infrastructure is wired; onMessage is called directly.
 ```
 
 Update `TestStubs` to wire the new collaborators:
