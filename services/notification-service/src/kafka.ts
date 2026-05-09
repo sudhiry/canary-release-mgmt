@@ -1,33 +1,68 @@
 import { Kafka, type Producer, type Consumer, type EachMessagePayload } from "kafkajs";
-import { stampXCanaryOnProducerRecord } from "@canary/lib-node";
+import {
+  stampXCanaryOnProducerRecord,
+  resolveConsumerGroupId,
+  shouldProcess,
+  runWithCanaryFromHeaders,
+  createKafkaHealthState,
+  type KafkaHealthState,
+  type KafkaConsumeHeaders,
+  XCanaryPresenceWatcher,
+} from "@canary/lib-node";
 import { consumedEventStore } from "./store.js";
 
 export interface KafkaSetupOptions {
   brokers: string[];
   consumersEnabled: boolean;
   producerEnabled: boolean;
-  /**
-   * How long send() waits for the producer to finish connecting before
-   * dropping the event with a warning. Default: 5000ms.
-   */
+  /** Service version: "stable" | "canary". Defaults to process.env.VERSION || "stable". */
+  ownVersion?: string;
+  /** K8s namespace for the presence watcher. Defaults to process.env.POD_NAMESPACE || "services". */
+  namespace?: string;
+  /** Disable the presence watcher entirely (e.g., for tests). */
+  presenceWatcherEnabled?: boolean;
+  /** Override kafka health timeout in ms. Defaults to 30000. */
+  kafkaHealthTimeoutMs?: number;
   sendTimeoutMs?: number;
-  /**
-   * How long the background connect loop waits between retries after
-   * KafkaJS's internal retry budget is exhausted. Default: 10000ms.
-   */
   reconnectIntervalMs?: number;
+  /**
+   * Test-only: override the isCanaryReady supplier so tests can exercise the
+   * stable+canaryReady filter cell without a real Kubernetes cluster.
+   * @internal
+   */
+  _testIsCanaryReady?: () => boolean;
 }
 
 export interface KafkaHandle {
   producer: Producer | null;
   consumer: Consumer | null;
   send: (topic: string, key: string, value: string) => Promise<void>;
+  health: KafkaHealthState;
+  presenceWatcher: XCanaryPresenceWatcher | null;
 }
 
 export async function setupKafka(opts: KafkaSetupOptions): Promise<KafkaHandle> {
+  const ownVersion = opts.ownVersion ?? process.env.VERSION ?? "stable";
+  const namespace = opts.namespace ?? process.env.POD_NAMESPACE ?? "services";
+  const watcherEnabled = opts.presenceWatcherEnabled ?? true;
+  const health = createKafkaHealthState(opts.kafkaHealthTimeoutMs ?? 30000);
+
   const kafka = new Kafka({ clientId: "notification-service", brokers: opts.brokers });
   const sendTimeoutMs = opts.sendTimeoutMs ?? 5000;
   const reconnectIntervalMs = opts.reconnectIntervalMs ?? 10000;
+
+  let presenceWatcher: XCanaryPresenceWatcher | null = null;
+  if (watcherEnabled && ownVersion === "stable") {
+    presenceWatcher = new XCanaryPresenceWatcher(namespace, "notification-service");
+    await presenceWatcher.start().catch((err) => {
+      console.warn(`notification-service presence watcher start failed: ${err}; canary will be treated as not-ready`);
+    });
+  }
+
+  // isCanaryReady supplier: prefer test override, then watcher, then false.
+  const isCanaryReady: () => boolean = opts._testIsCanaryReady
+    ? opts._testIsCanaryReady
+    : () => (presenceWatcher ? presenceWatcher.isCanaryReady() : false);
 
   let producer: Producer | null = null;
   let send: KafkaHandle["send"];
@@ -81,7 +116,8 @@ export async function setupKafka(opts: KafkaSetupOptions): Promise<KafkaHandle> 
 
   let consumer: Consumer | null = null;
   if (opts.consumersEnabled) {
-    const c = kafka.consumer({ groupId: "notification-service" });
+    const groupId = resolveConsumerGroupId("notification-service");
+    const c = kafka.consumer({ groupId });
     consumer = c;
     // Background connect + subscribe + run, same rationale as producer:
     // a Kafka outage at boot must not block app.listen() or readiness probes.
@@ -92,19 +128,29 @@ export async function setupKafka(opts: KafkaSetupOptions): Promise<KafkaHandle> 
           await c.subscribe({ topics: ["orders.events", "payments.events"] });
           await c.run({
             eachMessage: async ({ topic, message }: EachMessagePayload) => {
-              const headers: Record<string, string> = {};
-              for (const [k, v] of Object.entries(message.headers ?? {})) {
-                if (v) headers[k] = Buffer.isBuffer(v) ? v.toString("utf8") : String(v);
+              // recordPoll fires on every message BEFORE the filter check.
+              health.recordPoll();
+              // KafkaJS IHeaders is a superset of KafkaConsumeHeaders; lib only reads
+              // Buffer values (calls .toString("utf8")), so the cast is safe.
+              const headers = message.headers as KafkaConsumeHeaders;
+              if (!shouldProcess(headers, ownVersion, isCanaryReady)) {
+                return;
               }
-              consumedEventStore.record({
-                topic,
-                key: message.key?.toString("utf8") ?? null,
-                value: message.value?.toString("utf8") ?? "",
-                headers,
+              await runWithCanaryFromHeaders(headers, async () => {
+                const stringHeaders: Record<string, string> = {};
+                for (const [k, v] of Object.entries(message.headers ?? {})) {
+                  if (v) stringHeaders[k] = Buffer.isBuffer(v) ? v.toString("utf8") : String(v);
+                }
+                consumedEventStore.record({
+                  topic,
+                  key: message.key?.toString("utf8") ?? null,
+                  value: message.value?.toString("utf8") ?? "",
+                  headers: stringHeaders,
+                });
               });
             },
           });
-          console.log("notification-service Kafka consumer subscribed to orders.events, payments.events");
+          console.log(`notification-service Kafka consumer subscribed (groupId=${groupId})`);
           return;
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -118,5 +164,5 @@ export async function setupKafka(opts: KafkaSetupOptions): Promise<KafkaHandle> 
     console.log("KAFKA_CONSUMERS_ENABLED=false; consumer not started");
   }
 
-  return { producer, consumer, send };
+  return { producer, consumer, send, health, presenceWatcher };
 }

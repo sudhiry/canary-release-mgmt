@@ -6,12 +6,14 @@ import {
   xServedChainMiddleware,
   attachXCanaryAxiosInterceptor,
   attachXServedChainAxiosInterceptor,
+  type KafkaHealthState,
 } from "@canary/lib-node";
 import type { NotifyRequest } from "@canary/restate-defs-node";
 import { notificationStore, consumedEventStore } from "./store.js";
 
 export interface HttpDeps {
   ingressClient: AxiosInstance;
+  kafkaHealth?: KafkaHealthState;
 }
 
 export function buildIngressClient(ingressUrl: string): AxiosInstance {
@@ -24,7 +26,14 @@ export function buildIngressClient(ingressUrl: string): AxiosInstance {
 export function setupHttp(deps: HttpDeps): Express {
   const app = express();
   app.use(express.json());
-  app.get("/health", (_req, res) => res.json({ ok: true }));
+  app.get("/health", (_req, res) => {
+    const report = deps.kafkaHealth?.report();
+    if (report && !report.ok) {
+      res.status(503).json({ ok: false, kafka: report });
+      return;
+    }
+    res.json({ ok: true });
+  });
   app.use(xCanaryMiddleware);
   app.use(xServedVersionMiddleware());
   app.use(xServedChainMiddleware());

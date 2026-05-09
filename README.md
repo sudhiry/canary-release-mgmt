@@ -316,3 +316,21 @@ kubectl -n services exec deploy/payment-service-stable -- curl -s localhost:8081
 ```
 
 Next: Plan 2.b wires these abstractions into all 5 services, flips `KAFKA_CONSUMERS_ENABLED=true` in canary-overlay, and adds Phase 2 e2e scenarios K1–K5.
+
+## Plan 2.b — Service integration + Phase 2 e2e (complete)
+
+Plan 2.b consumes the Plan 2.a foundation. All 5 services now resolve their Kafka consumer group ID per subset (stable → `<svc>-stable`, canary → `<svc>-canary`), gate each message on `XCanaryConsumeFilter` / `shouldProcess`, propagate `x-canary` into the consume context (so downstream HTTP/Kafka/Restate calls inherit it), and record poll timestamps that flow into the readiness probe (Java: actuator `kafkaConsumer` indicator in the readiness group; Node: `/health` returns 503 when the in-memory health state reports stale).
+
+The canary overlay (`deploy/helm/values/canary-overlay.yaml`) flips `KAFKA_CONSUMERS_ENABLED` from `"false"` to `"true"`. Per-subset consumer groups are created by Kafka on first poll; no new KafkaTopic CRDs are needed.
+
+Phase 2 acceptance scenarios K1–K5 (under `tests/e2e/`) prove the four canary rules end-to-end:
+
+- **K1** — canary deployed + flagged event → only canary's `consumedEventStore` records it
+- **K2** — canary deployed + unflagged event → only stable's store records it
+- **K3** — canary NOT deployed + flagged event → stable's store records it (graceful fallback)
+- **K4** — flagged event consumed by canary's audit-service → downstream Kafka events at canary-side consumers carry `x-canary: true`
+- **K5** — canary process SIGSTOP'd → readiness probe fails → stable's pod watch flips → stable processes the next flagged event
+
+Subset-aware verification uses `kubectl port-forward pod/<name>` to each subset's pod (via `tests/e2e/helpers/pod-port-forward.ts`) and queries `/internal/consumed-events` directly — the edge gateway only routes `/api/orders`, and Istio subset-by-header is in-mesh-only, so the test runner has to address pods individually.
+
+Phase 2 (Kafka canary) is now feature-complete. Schema evolution (Phase 2.c) is deferred.

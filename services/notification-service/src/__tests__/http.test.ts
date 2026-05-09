@@ -3,6 +3,7 @@ import request from "supertest";
 import type { AxiosInstance } from "axios";
 import { setupHttp } from "../http.js";
 import { notificationStore } from "../store.js";
+import { createKafkaHealthState } from "@canary/lib-node";
 
 function mockAxios(): AxiosInstance {
   return {
@@ -66,5 +67,17 @@ describe("HTTP routes", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual([{ id: "n_1", userId: "u_42", message: "hi", status: "sent" }]);
+  });
+
+  it("GET /health returns 503 when kafka health state is stale", async () => {
+    // Create a health state with 1ms timeout, record a poll, then let it go stale.
+    const staleHealth = createKafkaHealthState(1);
+    staleHealth.recordPoll();
+    await new Promise<void>((r) => setTimeout(r, 10));
+
+    const app = setupHttp({ ingressClient: mockAxios(), kafkaHealth: staleHealth });
+    const res = await request(app).get("/health");
+    expect(res.status).toBe(503);
+    expect(res.body.ok).toBe(false);
   });
 });

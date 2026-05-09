@@ -8,7 +8,7 @@ export default defineConfig({
     exclude: [
       "**/node_modules/**",
       "**/dist/**",
-      ...(includeScenarios ? [] : ["s*.test.ts"]),
+      ...(includeScenarios ? [] : ["s*.test.ts", "k*.test.ts"]),
     ],
     environment: "node",
     globals: false,
