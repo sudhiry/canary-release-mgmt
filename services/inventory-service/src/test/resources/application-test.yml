@@ -1,0 +1,17 @@
+server:
+  port: 0
+
+spring:
+  kafka:
+    bootstrap-servers: localhost:0
+
+app:
+  kafka:
+    consumers:
+      enabled: false
+  restate:
+    register-handlers: false
+    ingress:
+      url: http://example.invalid
+    handler:
+      port: 0

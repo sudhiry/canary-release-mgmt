@@ -29,6 +29,8 @@ Local infrastructure is in place. The following commands are operational:
 | `make dashboards`        | Open Kiali / Grafana / Prometheus / Jaeger port-forwards (background) |
 | `make dashboards-stop`   | Stop all dashboard port-forwards                                   |
 | `make dashboards-status` | Show which dashboard port-forwards are running                     |
+| `make verify`            | Run all Java + Node unit tests (~118 tests)                        |
+| `make build-services`    | Compile all 5 service binaries (Java bootJars + Node tsc dist)     |
 | `make help`              | List available targets                                             |
 
 The Kafka cluster is reachable inside the mesh at
@@ -72,4 +74,35 @@ Build / test:
 | `./gradlew :platform:lib-java:test` | Java side only                |
 | `pnpm --filter @canary/lib-node test` | Node side only              |
 
-Next phase: 1.3 (the five domain services that consume these libraries).
+## Plan 1.3.a — Domain services code (complete)
+
+Five domain services live under `services/`:
+
+| Service | Stack | HTTP port (local) | Restate port | Kafka producer | Kafka consumer |
+|---|---|---|---|---|---|
+| order-service | TS + Node | 3001 | 9084 | `orders.events` | `payments.events`, `inventory.events` |
+| payment-service | Java + Spring Boot | 8081 | 9081 | `payments.events` | `orders.events` |
+| inventory-service | Java + Spring Boot | 8082 | 9082 | `inventory.events` | `orders.events` |
+| notification-service | TS + Node | 3002 | 9085 | `notifications.events` | `orders.events`, `payments.events` |
+| audit-service | Java + Spring Boot | 8083 | 9083 | `audit.events` | all `*.events` |
+
+Two new shared modules carry cross-service Restate type contracts:
+- `platform/restate-defs-java` — DTOs + abstract `@Service`/`@VirtualObject`/`@Workflow` definitions.
+- `platform/restate-defs-node` — TS DTOs + `restate.ServiceDefinition`-style defs.
+
+Per-service feature flags (set false on canary pods in 1.3.b):
+- `KAFKA_CONSUMERS_ENABLED` — gates `@KafkaListener` (Java) / `consumer.subscribe` (Node).
+- `RESTATE_REGISTER_HANDLERS` — gates the Restate HTTP endpoint listener.
+
+Build / test:
+
+| Command | What it does |
+|---|---|
+| `make verify` | Run all Java + Node unit tests (~118 tests) |
+| `make build-services` | Compile all 5 service binaries (Java bootJars + Node `tsc` dist) |
+| `./gradlew :services:<name>:test` | Java service tests in isolation |
+| `pnpm --filter @canary/<name> test` | Node service tests in isolation |
+
+**Phase 1.3.a is code only — no deployment artifacts.** Dockerfiles, KafkaTopic CRDs, k8s manifests, image build scripts, and the canary Helm overlay are 1.3.b.
+
+Next phase: 1.3.b (deployment artifacts so the services run on the kind cluster from Plan 1.1).
