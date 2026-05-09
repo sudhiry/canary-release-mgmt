@@ -6,22 +6,21 @@ import com.canary.platform.lib.XCanaryConsumeFilter;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
 import org.apache.kafka.common.header.internals.RecordHeaders;
+import org.apache.kafka.common.record.TimestampType;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class AuditKafkaListenerGatingTest {
 
-    /**
-     * Spring Boot 4 has no KafkaAutoConfiguration to load — the gating test only needs
-     * to verify that the bean class is filtered in/out by @ConditionalOnProperty. We
-     * load just the listener class directly; no Kafka infrastructure is actually wired.
-     */
+    // No Kafka infrastructure is wired; onMessage is called directly.
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
         .withUserConfiguration(TestStubs.class, AuditKafkaListener.class);
 
@@ -80,7 +79,7 @@ class AuditKafkaListenerGatingTest {
     }
 
     @Test
-    void canaryHeaderSetsContextDuringHandler() {
+    void canaryHeaderIsPersistedToStoredEvent() {
         runner.run(ctx -> {
             AuditKafkaListener listener = ctx.getBean(AuditKafkaListener.class);
             AtomicBoolean shouldProcess = ctx.getBean("shouldProcessFlag", AtomicBoolean.class);
@@ -95,10 +94,10 @@ class AuditKafkaListenerGatingTest {
 
     private static ConsumerRecord<String, String> record(String topic, String key, String value, boolean canary) {
         RecordHeaders headers = new RecordHeaders();
-        if (canary) headers.add(new RecordHeader("x-canary", "true".getBytes()));
+        if (canary) headers.add(new RecordHeader("x-canary", "true".getBytes(StandardCharsets.UTF_8)));
         return new ConsumerRecord<>(topic, 0, 0L, 0L,
-                org.apache.kafka.common.record.TimestampType.NO_TIMESTAMP_TYPE,
-                -1, -1, key, value, headers, java.util.Optional.empty());
+                TimestampType.NO_TIMESTAMP_TYPE,
+                -1, -1, key, value, headers, Optional.empty());
     }
 
     @Configuration
