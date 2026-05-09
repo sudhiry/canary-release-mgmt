@@ -48,7 +48,10 @@ export async function notifyHandler(ctx: restate.Context, req: NotifyRequest): P
       action: "sent",
       correlationId: req.orderId,
     };
-    await ctx.serviceClient(auditQueryServiceDef).append(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // The Restate SDK's Client<M> type collapses (arg, opts?) to (opts?) for handlers that take one arg.
+    // At runtime optsFromArgs() correctly handles (parameter, Opts) — cast to bypass the type gap.
+    await (ctx.serviceClient(auditQueryServiceDef) as any).append(
       auditEvent,
       restate.rpc.opts(applyXCanaryToRestateOptions({})),
     );

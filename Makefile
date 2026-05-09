@@ -1,4 +1,4 @@
-.PHONY: help up down status smoke-infra dashboards dashboards-stop dashboards-status verify clean
+.PHONY: help up down status smoke-infra dashboards dashboards-stop dashboards-status verify build-services clean
 
 # Versions (pinned for reproducibility)
 KIND_CLUSTER_NAME := canary-release-mgmt
@@ -33,10 +33,17 @@ dashboards-stop: ## Stop all dashboard port-forwards
 dashboards-status: ## Show which dashboard port-forwards are running
 	@bash deploy/kind/dashboards.sh status
 
-verify: ## Run all unit/library tests (Java + Node)
+verify: ## Run all unit/library/service tests (Java + Node)
 	@echo "==> Java"
-	@./gradlew :platform:lib-java:test --quiet
+	@./gradlew test --quiet
 	@echo "==> Node"
-	@pnpm --filter @canary/lib-node test
+	@pnpm -r --filter "@canary/*" run test
+
+build-services: ## Compile all 5 service binaries (Java bootJars + Node tsc dist)
+	@echo "==> Java services"
+	@./gradlew :services:audit-service:bootJar :services:payment-service:bootJar :services:inventory-service:bootJar --quiet
+	@echo "==> Node services"
+	@pnpm --filter @canary/order-service build
+	@pnpm --filter @canary/notification-service build
 
 clean: down ## Alias for down
