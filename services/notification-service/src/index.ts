@@ -1,11 +1,13 @@
 import { loadConfig } from "./config.js";
+import { setupHttp, buildIngressClient } from "./http.js";
 
 const config = loadConfig();
 
-console.log("notification-service booting", {
-  httpPort: config.HTTP_PORT,
-  restateRegisterHandlers: config.RESTATE_REGISTER_HANDLERS,
-  kafkaConsumersEnabled: config.KAFKA_CONSUMERS_ENABLED,
+const ingressClient = buildIngressClient(config.RESTATE_INGRESS_URL);
+const app = setupHttp({ ingressClient });
+
+app.listen(config.HTTP_PORT, () => {
+  console.log(`notification-service HTTP listening on ${config.HTTP_PORT}`);
 });
 
-// HTTP, Kafka, Restate setup are wired in Tasks 17, 18, 19.
+// Kafka + Restate setup wired in Tasks 18 + 19.
