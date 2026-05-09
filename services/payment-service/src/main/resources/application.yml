@@ -1,0 +1,19 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: payment-service
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+app:
+  kafka:
+    consumers:
+      enabled: ${KAFKA_CONSUMERS_ENABLED:true}
+  restate:
+    register-handlers: ${RESTATE_REGISTER_HANDLERS:true}
+    ingress:
+      url: ${RESTATE_INGRESS_URL:http://localhost:9070}
+    handler:
+      port: ${RESTATE_HANDLER_PORT:9081}
