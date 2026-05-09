@@ -2,3 +2,4 @@ packages:
   - "platform/lib-node"
   - "platform/restate-defs-node"
   - "services/*"
+  - "tools/*"
