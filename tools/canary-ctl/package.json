@@ -1,0 +1,26 @@
+{
+  "name": "@canary/canary-ctl",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "canary-ctl": "bin/canary-ctl"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist", "bin"],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}
