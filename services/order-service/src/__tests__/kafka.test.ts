@@ -52,10 +52,13 @@ describe("setupKafka (order-service)", () => {
 
   it("subscribes to payments.events + inventory.events when consumersEnabled=true", async () => {
     await setupKafka({ brokers: ["localhost:9092"], consumersEnabled: true, producerEnabled: true });
-    expect(subscribeMock).toHaveBeenCalledWith({
-      topics: ["payments.events", "inventory.events"],
+    // Consumer setup runs in the background; wait for it to reach subscribe+run.
+    await vi.waitFor(() => {
+      expect(subscribeMock).toHaveBeenCalledWith({
+        topics: ["payments.events", "inventory.events"],
+      });
+      expect(runMock).toHaveBeenCalledOnce();
     });
-    expect(runMock).toHaveBeenCalledOnce();
   });
 
   it("send() forwards orders.events through producer.send (with stamping wrapper applied)", async () => {
@@ -67,5 +70,43 @@ describe("setupKafka (order-service)", () => {
     expect(arg.topic).toBe("orders.events");
     expect(arg.messages[0].key).toBe("ord_1");
     expect(arg.messages[0].value).toBe("{}");
+  });
+
+  it("setupKafka() returns immediately even when producer.connect() never resolves", async () => {
+    // simulate a broker that never answers — connect() pending forever
+    connectMock.mockImplementationOnce(() => new Promise<void>(() => {}));
+
+    const start = Date.now();
+    const kafka = await setupKafka({
+      brokers: ["localhost:9092"],
+      consumersEnabled: false,
+      producerEnabled: true,
+      sendTimeoutMs: 50,
+      reconnectIntervalMs: 50,
+    });
+    const elapsed = Date.now() - start;
+
+    expect(elapsed).toBeLessThan(200);
+    expect(kafka.producer).not.toBeNull();
+  });
+
+  it("send() drops event with warning when producer not connected within sendTimeoutMs", async () => {
+    connectMock.mockImplementationOnce(() => new Promise<void>(() => {}));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const kafka = await setupKafka({
+        brokers: ["localhost:9092"],
+        consumersEnabled: false,
+        producerEnabled: true,
+        sendTimeoutMs: 50,
+        reconnectIntervalMs: 50,
+      });
+
+      await expect(kafka.send("orders.events", "ord_1", "{}")).resolves.toBeUndefined();
+      expect(sendMock).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("send dropped"));
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
