@@ -42,9 +42,8 @@ verify: ## Run all unit/library/service tests (Java + Node)
 build-services: ## Compile all 5 service binaries (Java bootJars + Node tsc dist)
 	@echo "==> Java services"
 	@./gradlew :services:audit-service:bootJar :services:payment-service:bootJar :services:inventory-service:bootJar --quiet
-	@echo "==> Node services"
-	@pnpm --filter @canary/order-service build
-	@pnpm --filter @canary/notification-service build
+	@echo "==> Node services (with workspace deps in topo order)"
+	@pnpm --filter '@canary/order-service...' --filter '@canary/notification-service...' build
 
 build-images: ## Build all 5 service docker images
 	@bash deploy/images/build-and-load.sh build
