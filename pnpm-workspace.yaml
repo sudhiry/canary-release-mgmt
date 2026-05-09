@@ -3,3 +3,4 @@ packages:
   - "platform/restate-defs-node"
   - "services/*"
   - "tools/*"
+  - "tests/*"
