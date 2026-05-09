@@ -100,9 +100,9 @@ describe("HTTP routes", () => {
   it("GET /health returns 200 with {ok: true}", async () => {
     const app = setupHttp({
       clients: {
-        inventory: { post: () => Promise.reject() } as unknown as AxiosInstance,
-        payment: { post: () => Promise.reject() } as unknown as AxiosInstance,
-        notification: { post: () => Promise.reject() } as unknown as AxiosInstance,
+        inventory: mockAxios(null),
+        payment: mockAxios(null),
+        notification: mockAxios(null),
       },
     });
     const res = await request(app).get("/health");
