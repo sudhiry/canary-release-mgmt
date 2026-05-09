@@ -1,5 +1,6 @@
 import { loadConfig } from "./config.js";
 import { setupHttp, buildClient } from "./http.js";
+import { setupRestate } from "./restate.js";
 
 const config = loadConfig();
 
@@ -15,4 +16,9 @@ app.listen(config.HTTP_PORT, () => {
   console.log(`order-service HTTP listening on ${config.HTTP_PORT}`);
 });
 
-// Kafka + Restate setup are wired in Tasks 22 + 23.
+await setupRestate({
+  registerHandlers: config.RESTATE_REGISTER_HANDLERS,
+  port: config.RESTATE_HANDLER_PORT,
+});
+
+// Kafka setup wired in Task 23.
