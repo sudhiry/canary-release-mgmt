@@ -30,7 +30,7 @@ await setupRestate({
 
 const shutdown = async () => {
   console.log("order-service shutting down");
-  if (kafka.presenceWatcher) { try { kafka.presenceWatcher.close(); } catch { /* ignore */ } }
+  if (kafka.presenceWatcher) kafka.presenceWatcher.close();
   if (kafka.consumer) await kafka.consumer.disconnect().catch(() => {});
   if (kafka.producer) await kafka.producer.disconnect().catch(() => {});
   server.close();
