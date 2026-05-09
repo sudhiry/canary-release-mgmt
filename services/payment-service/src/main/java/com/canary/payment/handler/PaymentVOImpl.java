@@ -6,6 +6,8 @@ import com.canary.restate.audit.AuditEvent;
 import com.canary.restate.payment.Charge;
 import com.canary.restate.payment.ChargeRequest;
 import com.canary.restate.payment.PaymentVO;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.restate.common.InvocationOptions;
 import dev.restate.common.Request;
 import dev.restate.common.Target;
@@ -13,6 +15,7 @@ import dev.restate.sdk.Context;
 import dev.restate.sdk.ObjectContext;
 import dev.restate.sdk.common.StateKey;
 import dev.restate.serde.TypeTag;
+import org.springframework.kafka.core.KafkaTemplate;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -37,10 +40,15 @@ public class PaymentVOImpl extends PaymentVO {
 
     private final ChargeStore store;
     private final XCanaryRestateClientCustomizer canary;
+    private final KafkaTemplate<String, String> kafkaTemplate;
+    private final ObjectMapper objectMapper;
 
-    public PaymentVOImpl(ChargeStore store, XCanaryRestateClientCustomizer canary) {
+    public PaymentVOImpl(ChargeStore store, XCanaryRestateClientCustomizer canary,
+                         KafkaTemplate<String, String> kafkaTemplate, ObjectMapper objectMapper) {
         this.store = store;
         this.canary = canary;
+        this.kafkaTemplate = kafkaTemplate;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -61,6 +69,13 @@ public class PaymentVOImpl extends PaymentVO {
         );
         ctx.set(CHARGE_STATE, charge);
         store.put(charge);
+
+        // Emit Kafka event to payments.events
+        try {
+            kafkaTemplate.send("payments.events", charge.id(), objectMapper.writeValueAsString(charge));
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Failed to serialize Charge", e);
+        }
 
         // Restate-to-Restate: append audit event. Customizer stamps x-canary on headers
         // when the calling thread is in canary context.

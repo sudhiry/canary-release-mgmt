@@ -2,10 +2,13 @@ package com.canary.payment.config;
 
 import com.canary.payment.store.ChargeStore;
 import com.canary.platform.lib.XCanaryRestateClientCustomizer;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.core.KafkaTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -42,6 +45,17 @@ class RestateEndpointGatingTest {
         @Bean
         XCanaryRestateClientCustomizer canary() {
             return new XCanaryRestateClientCustomizer();
+        }
+
+        @Bean
+        @SuppressWarnings("unchecked")
+        KafkaTemplate<String, String> kafkaTemplate() {
+            return Mockito.mock(KafkaTemplate.class);
+        }
+
+        @Bean
+        ObjectMapper objectMapper() {
+            return new ObjectMapper();
         }
     }
 }

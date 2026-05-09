@@ -7,6 +7,7 @@ import com.canary.platform.lib.XCanaryRestateClientCustomizer;
 import com.canary.restate.audit.AuditEvent;
 import com.canary.restate.payment.Charge;
 import com.canary.restate.payment.ChargeRequest;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.restate.common.Request;
 import dev.restate.sdk.CallDurableFuture;
 import dev.restate.sdk.ObjectContext;
@@ -16,11 +17,13 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.kafka.core.KafkaTemplate;
 
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -30,6 +33,9 @@ class PaymentVOImplTest {
 
     ChargeStore store;
     XCanaryRestateClientCustomizer canary;
+    @SuppressWarnings("unchecked")
+    KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
+    ObjectMapper objectMapper = new ObjectMapper();
     PaymentVOImpl handler;
     ObjectContext ctx;
 
@@ -37,7 +43,7 @@ class PaymentVOImplTest {
     void setUp() {
         store = new ChargeStore();
         canary = new XCanaryRestateClientCustomizer();
-        handler = new PaymentVOImpl(store, canary);
+        handler = new PaymentVOImpl(store, canary, kafkaTemplate, objectMapper);
         ctx = mock(ObjectContext.class);
         // Install the mock ObjectContext into the Restate thread-local so Context.current()
         // returns it when handler.charge() calls (ObjectContext) Context.current().
@@ -107,5 +113,20 @@ class PaymentVOImplTest {
         Request<?, ?> sentReq = reqCap.getValue();
         assertThat(sentReq.getHeaders())
             .containsEntry(XCanaryConstants.HEADER_NAME, XCanaryConstants.TRUE_VALUE);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void chargeEmitsPaymentsEvent() throws Exception {
+        when(ctx.get(any(StateKey.class))).thenReturn(Optional.empty());
+        when(ctx.call(any(Request.class))).thenReturn(mock(CallDurableFuture.class));
+
+        Charge result = handler.charge(new ChargeRequest("ord_42", 1500L));
+
+        var keyCap = ArgumentCaptor.forClass(String.class);
+        var valueCap = ArgumentCaptor.forClass(String.class);
+        verify(kafkaTemplate).send(eq("payments.events"), keyCap.capture(), valueCap.capture());
+        assertThat(keyCap.getValue()).isEqualTo(result.id());
+        assertThat(objectMapper.readValue(valueCap.getValue(), Charge.class)).isEqualTo(result);
     }
 }
