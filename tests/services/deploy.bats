@@ -27,10 +27,13 @@ TOPICS="audit.events inventory.events notifications.events orders.events payment
 }
 
 @test "all 5 Services have at least one endpoint" {
+  # Use the EndpointSlice API (v1 Endpoints is deprecated in 1.33+, prints a
+  # warning to stderr that pollutes parsed output). Suppress kubectl stderr
+  # to keep the IP-count parse clean.
   for svc in $SERVICES; do
-    run bash -c "kubectl get -n services endpoints '$svc' -o jsonpath='{.subsets[0].addresses[*].ip}' | wc -w"
+    run bash -c "kubectl get -n services endpointslices.discovery.k8s.io -l kubernetes.io/service-name='$svc' -o jsonpath='{.items[*].endpoints[*].addresses[*]}' 2>/dev/null | wc -w | tr -d ' '"
     [ "$status" -eq 0 ]
-    [ "$output" -ge 1 ] || { echo "service $svc has no endpoints" >&3; false; }
+    [ "$output" -ge 1 ] || { echo "service $svc has no endpoints (got: '$output')" >&3; false; }
   done
 }
 
