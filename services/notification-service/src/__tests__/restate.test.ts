@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { setupRestate, notificationService, notifyHandler } from "../restate.js";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { setupRestate, notificationService, notifyHandler, configureKafkaSend, type KafkaSend } from "../restate.js";
 import { notificationStore } from "../store.js";
 
 vi.mock("@restatedev/restate-sdk", async () => {
@@ -47,6 +47,11 @@ describe("NotificationService.notify handler", () => {
     (notificationStore as unknown as { byId: Map<string, unknown> }).byId.clear();
   });
 
+  afterEach(() => {
+    // Reset kafkaSend so no mock leaks between tests
+    configureKafkaSend(null as unknown as KafkaSend);
+  });
+
   it("writes Notification to store and calls AuditQueryService.append", async () => {
     const auditAppend = vi.fn().mockResolvedValue(undefined);
     // ctx.request().headers is a ReadonlyMap<string, string> in SDK 1.14.
@@ -84,5 +89,27 @@ describe("NotificationService.notify handler", () => {
 
     const [, opts] = auditAppend.mock.calls[0] as [unknown, { getOpts(): { headers?: Record<string, string> } }];
     expect(opts.getOpts().headers?.["x-canary"]).toBe("true");
+  });
+
+  it("emits notifications.events via the configured kafkaSend", async () => {
+    const kafkaSendMock = vi.fn().mockResolvedValue(undefined);
+    configureKafkaSend(kafkaSendMock);
+
+    const auditAppend = vi.fn().mockResolvedValue(undefined);
+    const ctx = {
+      request: () => ({ headers: new Map<string, string>() }),
+      serviceClient: vi.fn().mockReturnValue({ append: auditAppend }),
+    };
+
+    const result = await notifyHandler(
+      ctx as unknown as import("@restatedev/restate-sdk").Context,
+      { userId: "u_1", message: "hi", orderId: "ord_1" },
+    );
+
+    expect(kafkaSendMock).toHaveBeenCalledWith(
+      "notifications.events",
+      result.id,
+      expect.stringContaining(result.id),
+    );
   });
 });

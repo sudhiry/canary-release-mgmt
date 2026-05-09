@@ -15,6 +15,14 @@ export interface RestateSetupOptions {
   port: number;
 }
 
+export type KafkaSend = (topic: string, key: string, value: string) => Promise<void>;
+
+let kafkaSend: KafkaSend | null = null;
+
+export function configureKafkaSend(fn: KafkaSend): void {
+  kafkaSend = fn;
+}
+
 // Export the handler directly for unit testing
 export async function notifyHandler(ctx: restate.Context, req: NotifyRequest): Promise<Notification> {
   // Read x-canary from invocation metadata.
@@ -29,6 +37,10 @@ export async function notifyHandler(ctx: restate.Context, req: NotifyRequest): P
       status: "sent",
     };
     notificationStore.put(notification);
+
+    if (kafkaSend) {
+      await kafkaSend("notifications.events", notification.id, JSON.stringify(notification));
+    }
 
     const auditEvent: AuditEvent = {
       aggregate: "notification",
