@@ -20,14 +20,10 @@ export class XCanaryPresenceWatcher {
     const labelSelector = `app=${this.serviceName},version=canary`;
     const coreApi = this.kc.makeApiClient(CoreV1Api);
 
-    const list = await coreApi.listNamespacedPod(
-      this.namespace,
-      undefined, // pretty
-      undefined, // allowWatchBookmarks
-      undefined, // _continue
-      undefined, // fieldSelector
+    const list = await coreApi.listNamespacedPod({
+      namespace: this.namespace,
       labelSelector,
-    );
+    });
     for (const p of list.items) {
       const name = p.metadata?.name;
       if (name) this.podReady.set(name, isPodReady(p));
