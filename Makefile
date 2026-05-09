@@ -64,3 +64,28 @@ smoke-services: ## Run service deployment smoke tests
 	@bats tests/services/deploy.bats
 
 clean: down ## Alias for down
+
+.PHONY: canary-deploy canary-rollback canary-status canary-reconcile smoke-canary
+
+canary-deploy: ## Deploy a canary: SVC=<service> TAG=<image-tag>
+	@if [ -z "$(SVC)" ] || [ -z "$(TAG)" ]; then \
+	  echo "usage: make canary-deploy SVC=<service> TAG=<tag>" >&2; exit 2; \
+	fi
+	@node tools/canary-ctl/bin/canary-ctl deploy-canary $(SVC) $(TAG)
+
+canary-rollback: ## Rollback a canary: SVC=<service>
+	@if [ -z "$(SVC)" ]; then echo "usage: make canary-rollback SVC=<service>" >&2; exit 2; fi
+	@node tools/canary-ctl/bin/canary-ctl rollback $(SVC)
+
+canary-status: ## Show canary status: SVC=<service>
+	@if [ -z "$(SVC)" ]; then echo "usage: make canary-status SVC=<service>" >&2; exit 2; fi
+	@node tools/canary-ctl/bin/canary-ctl status $(SVC)
+
+canary-reconcile: ## Reconcile canary state for SVC=<service>
+	@if [ -z "$(SVC)" ]; then echo "usage: make canary-reconcile SVC=<service>" >&2; exit 2; fi
+	@node tools/canary-ctl/bin/canary-ctl reconcile $(SVC)
+
+smoke-canary: ## Run canary-ctl bats smoke tests (requires deployed substrate)
+	@pnpm --filter @canary/canary-ctl build >/dev/null
+	@pnpm --filter @canary/traffic-cli build >/dev/null
+	@bats tests/canary/canary-ctl.bats
