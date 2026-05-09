@@ -1,0 +1,14 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: order-service
+  namespace: services
+spec:
+  hosts:
+    - order-service.services.svc.cluster.local
+  http:
+    - name: default
+      route:
+        - destination:
+            host: order-service.services.svc.cluster.local
+            subset: stable
