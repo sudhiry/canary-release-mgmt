@@ -201,3 +201,44 @@ traffic-cli order [--canary] [--user u1] [--sku sku-1] [--quantity 1] [--amount 
 Sends one POST to the kind ingress. `--canary` adds `x-canary: true`. Verifying which subset *served* the request belongs to Plan 1.5's e2e harness — for 1.4 use Kiali (http://localhost:20001) to confirm by eye.
 
 Next phase: 1.5 (13 canonical acceptance scenarios).
+
+## Plan 1.5.a — e2e harness foundation + S1 Baseline (complete)
+
+The TypeScript e2e harness lives in `tests/e2e/` (workspace package `@canary/e2e`). It uses **vitest** with a sequential single-fork pool so cluster-mutation scenarios don't conflict. Each service stamps `x-served-version: stable | canary` on outbound HTTP responses (via lib-java auto-config + lib-node middleware), letting tests trivially assert which subset handled a request.
+
+### Quickstart
+
+```bash
+make up                                                   # 1.1
+make build-services                                       # 1.3.a + new lib changes
+make build-images && make load-images                     # 1.3.b
+make deploy-services                                      # 1.3.b
+
+# 1.5.a additions:
+make e2e SCENARIO=s1                                      # run S1 Baseline only
+make e2e                                                  # run all e2e scenarios (just S1 in 1.5.a)
+make ci-local                                             # fast subset (just S1 in 1.5.a)
+```
+
+### What S1 verifies
+
+S1 Baseline asserts that on a clean stable cluster (no canary deployed):
+- `POST /api/orders` without `x-canary` returns 2xx with `x-served-version: stable`
+- `POST /api/orders` with `x-canary: true` ALSO returns 2xx with `x-served-version: stable` (graceful fallback)
+
+This doubles as coverage for the umbrella spec's S5 (no-canary graceful fallback). S5 still gets its own dedicated file when 1.5.b ships, for clarity.
+
+### Helpers
+
+`tests/e2e/helpers/` contains reusable building blocks for 1.5.b's scenarios:
+
+| Helper | What it does |
+|---|---|
+| `canary.ts` | Shells out to `node tools/canary-ctl/bin/canary-ctl` for `deployCanary`, `rollback`, `status`, `reconcile`. |
+| `traffic.ts` | `sendOrder({canary, user, sku, ...})` — single POST to `/api/orders`. |
+| `subset.ts` | `assertServedVersion(headers, "stable" \| "canary")`. |
+| `load.ts` | `runLoad({url, rps, durationSeconds})` — TS-native load gen, returns p50/p99 + counts. |
+| `kafka-admin.ts` | kafkajs admin: consumer-group descriptions. (Used by S10 in 1.5.b.) |
+| `restate-admin.ts` | axios `GET :9070/deployments` and `/services`. (Used by S11 in 1.5.b.) |
+
+Next phase: 1.5.b (12 remaining scenarios S2–S13).
