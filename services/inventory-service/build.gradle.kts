@@ -8,6 +8,7 @@ dependencies {
     implementation(project(":platform:lib-java"))
     implementation(project(":platform:restate-defs-java"))
     implementation(libs.spring.boot.starter.web)
+    implementation(libs.spring.boot.starter.actuator)
     implementation(libs.spring.kafka)
     implementation(libs.restate.sdk.api)
     implementation(libs.restate.sdk.common)

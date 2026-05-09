@@ -11,6 +11,7 @@ assertj = "3.26.3"
 [libraries]
 spring-boot-starter-web        = { module = "org.springframework.boot:spring-boot-starter-web" }
 spring-boot-starter-test       = { module = "org.springframework.boot:spring-boot-starter-test" }
+spring-boot-starter-actuator   = { module = "org.springframework.boot:spring-boot-starter-actuator" }
 spring-boot-autoconfigure      = { module = "org.springframework.boot:spring-boot-autoconfigure" }
 spring-kafka                   = { module = "org.springframework.kafka:spring-kafka" }
 kafka-clients                  = { module = "org.apache.kafka:kafka-clients", version.ref = "kafka" }
