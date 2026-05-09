@@ -5,6 +5,7 @@ plugins {
 dependencies {
     api(libs.spring.boot.autoconfigure)
     api(libs.spring.boot.starter.web)
+    api(libs.spring.boot.starter.actuator)
     api(libs.spring.kafka)
     api(libs.restate.sdk.api)
     api(libs.restate.sdk.common)
