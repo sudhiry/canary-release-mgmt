@@ -1,6 +1,6 @@
 # Canary overlay — applied IN ADDITION to a per-service values file by
-# Plan 1.4's canary-ctl. Hard-codes the canary contract from the Phase 1 spec:
-#   - canary pods do not consume Kafka (no partition stealing)
+# Plan 1.4's canary-ctl. Hard-codes the Phase 2.b canary contract:
+#   - canary pods DO consume Kafka (per-subset consumer group <svc>-canary)
 #   - canary pods do not register Restate handlers (only stable owns the registry)
 #   - canary pods carry the version: canary label so Istio's DestinationRule
 #     subset routing can target them
@@ -14,7 +14,7 @@
 version: canary
 replicas: 1
 env:
-  KAFKA_CONSUMERS_ENABLED: "false"
+  KAFKA_CONSUMERS_ENABLED: "true"
   RESTATE_REGISTER_HANDLERS: "false"
 restate:
   registerEndpoint: false
