@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { lookup } from "../registry.js";
 import { listReleases, uninstallCanary } from "../helm.js";
 import {
@@ -25,6 +26,7 @@ export interface ReconcileOpts {
   service: string;
   stateDir: string;
   adopt: boolean;
+  reconcileTimeoutMs?: number;
 }
 
 export interface ReconcileResult {
@@ -80,19 +82,30 @@ export async function reconcile(opts: ReconcileOpts): Promise<ReconcileResult> {
       if (!canaryReleasePresent) {
         deleteState(opts.stateDir, entry.name);
         action = "clear-stale-state";
-      } else if (dep.exists && dep.ready === dep.total && dep.total > 0) {
-        // Progress through deployment-ready → active.
-        await patchVirtualService(entry.virtualService, entry.namespace, buildHeaderRulePatch(entry.virtualService));
-        writeState(opts.stateDir, { ...state, phase: "active" });
-        action = "complete-deploy";
       } else {
-        // Release exists but not Ready — roll back.
-        if (vs.hasHeaderRule) {
-          await patchVirtualService(entry.virtualService, entry.namespace, buildDefaultOnlyPatch(entry.virtualService));
+        // Poll for readiness up to reconcileTimeoutMs (default 30 s).
+        const timeoutMs = opts.reconcileTimeoutMs ?? 30000;
+        const pollIntervalMs = 2000;
+        const deadline = Date.now() + timeoutMs;
+        let currentDep = dep;
+        while (!(currentDep.exists && currentDep.ready === currentDep.total && currentDep.total > 0) && Date.now() < deadline) {
+          await sleep(pollIntervalMs);
+          currentDep = await getDeploymentReady(entry.helmReleaseCanary, entry.namespace);
         }
-        await uninstallCanary(entry.helmReleaseCanary, entry.namespace);
-        deleteState(opts.stateDir, entry.name);
-        action = "rollback-stale-state";
+        if (currentDep.exists && currentDep.ready === currentDep.total && currentDep.total > 0) {
+          // Now Ready — complete deploy.
+          await patchVirtualService(entry.virtualService, entry.namespace, buildHeaderRulePatch(entry.virtualService));
+          writeState(opts.stateDir, { ...state, phase: "active" });
+          action = "complete-deploy";
+        } else {
+          // Still not Ready after timeout — roll back.
+          if (vs.hasHeaderRule) {
+            await patchVirtualService(entry.virtualService, entry.namespace, buildDefaultOnlyPatch(entry.virtualService));
+          }
+          await uninstallCanary(entry.helmReleaseCanary, entry.namespace);
+          deleteState(opts.stateDir, entry.name);
+          action = "rollback-stale-state";
+        }
       }
       break;
 

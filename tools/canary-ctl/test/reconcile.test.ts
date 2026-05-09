@@ -104,4 +104,16 @@ describe("reconcile", () => {
     expect(uninstallMock).toHaveBeenCalled();
     expect(readState(dir, "inventory-service")).toBeNull();
   });
+
+  it("phase=deploying + release NotReady: waits then rolls back if still NotReady (small timeout)", async () => {
+    writeState(dir, { service: "order-service", phase: "deploying", tag: "v2", deployedAt: "2026-05-09T18:30:00Z" });
+    listMock.mockResolvedValue([{ name: "order-service-canary", status: "deployed" }]);
+    // Always NotReady.
+    depMock.mockResolvedValue({ ready: 0, total: 1, exists: true });
+    vsMock.mockResolvedValue({ hasHeaderRule: false, ruleNames: ["default"] });
+    const r = await reconcile({ service: "order-service", stateDir: dir, adopt: false, reconcileTimeoutMs: 100 });
+    expect(r.action).toBe("rollback-stale-state");
+    expect(uninstallMock).toHaveBeenCalled();
+    expect(readState(dir, "order-service")).toBeNull();
+  });
 });
