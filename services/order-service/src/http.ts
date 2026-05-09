@@ -22,6 +22,8 @@ export function setupHttp(deps: HttpDeps): Express {
   app.use(express.json());
   app.use(xCanaryMiddleware);
 
+  app.get("/health", (_req, res) => res.json({ ok: true }));
+
   app.post("/api/orders", async (req, res) => {
     const body = req.body as OrderRequest;
     const orderId = randomUUID();
