@@ -33,7 +33,7 @@ These are the building blocks 2.b consumes. Their public API is fixed.
 | `x-canary-consumer-group.ts` | `resolveConsumerGroupId(baseGroupId: string): string` |
 | `x-canary-consume-filter.ts` | `shouldProcess(headers, ownVersion, isCanaryReady): boolean`, `isCanaryFlagged(headers): boolean` |
 | `x-canary-consume-context.ts` | `runWithCanaryFromHeaders(headers, async handler): Promise<T>` |
-| `x-canary-presence-watcher.ts` | `class XCanaryPresenceWatcher({namespace, serviceName})` with `.start()`, `.stop()`, `.isCanaryReady()` |
+| `x-canary-presence-watcher.ts` | `class XCanaryPresenceWatcher(namespace, serviceName, kc?)` with `async start(): Promise<void>`, `close(): void` (sync), `isCanaryReady(): boolean` |
 | `kafka-consumer-health.ts` | `createKafkaHealthState(timeoutMs?)` → `{recordPoll(), isHealthy(), report()}` |
 
 `resolveConsumerGroupId` reads `process.env.VERSION` (default `"stable"`) and returns `<baseGroupId>-<version>`.
@@ -909,47 +909,73 @@ git commit -m "feat(order): wire Phase 2.b canary consumer (group resolver + fil
 - Modify: `services/notification-service/src/http.ts`
 - Modify: `services/notification-service/src/index.ts`
 - Modify: `services/notification-service/src/__tests__/kafka.test.ts`
+- Modify (or extend): `services/notification-service/src/__tests__/http.test.ts` (if it exists; the `/health` 503 test belongs there for cleaner file organization)
 
-- [ ] **Step 1: Extend `kafka.test.ts`**
+**Reference Task 4's commit `1b69a13`** for the working pattern. `git show 1b69a13 -- services/order-service/` shows exactly the substitution-ready code.
 
-Same canary tests as Task 4 Step 2, substituting `notification-service` for `order-service` and topics `["orders.events", "payments.events"]`.
+**Adopt these refinements** from Task 4's review (don't recreate Task 4's minor smells):
 
-- [ ] **Step 2: Run tests to verify they fail**
+1. **`presenceWatcher.close()` in shutdown is unprotected** — no `try/catch` wrap (`XCanaryPresenceWatcher.close()` already swallows abort errors internally and returns void). Just call it directly:
+   ```typescript
+   if (kafka.presenceWatcher) kafka.presenceWatcher.close();
+   ```
+2. **Place the `/health` 503 test in the `http.test.ts` file**, not in `kafka.test.ts`. It exercises `setupHttp`, not `setupKafka`. The other 5 canary tests (group-id resolution + 3 filter cells + recordPoll-on-every-message) belong in `kafka.test.ts`.
+3. **The `XCanaryPresenceWatcher` API is positional** — `new XCanaryPresenceWatcher(namespace, "notification-service")`, NOT options-object form.
+4. **Test seam**: use `presenceWatcherEnabled: false` + `_testIsCanaryReady` injection (single optional field on `KafkaSetupOptions`, prefix `_test` to signal test-only). Same pattern as order-service.
+5. **`process.env.VERSION` must be set BEFORE calling `setupKafka`** — `resolveConsumerGroupId` reads the env at call-time, not module-load. Restore env in `afterEach`.
+6. **The `IHeaders` cast for kafkajs → lib** — kafkajs `IHeaders` is `Record<string, Buffer | string | (Buffer | string)[] | undefined>`, while lib's `KafkaConsumeHeaders` is `Record<string, Buffer | undefined>`. The lib only calls `.toString("utf8")` on Buffer values; in this repo all canary headers are written via `stampXCanaryOnProducerRecord` (which writes Buffers). A localized `as KafkaConsumeHeaders` cast with a brief comment explaining the asymmetry is acceptable.
 
-Run: `pnpm -F @canary/notification-service test`
-Expected: New tests fail.
-
-- [ ] **Step 3: Modify `kafka.ts`**
-
-Apply the same structural changes as Task 4 Step 4 to `services/notification-service/src/kafka.ts`. Service-specific differences:
+**Service-specific differences from order-service:**
 - `clientId: "notification-service"`
 - Subscribe topics: `["orders.events", "payments.events"]`
 - `resolveConsumerGroupId("notification-service")`
 - `serviceName: "notification-service"` for the presence watcher
+- Read `services/notification-service/src/index.ts` first to preserve any service-specific bootstrap (downstream clients, restate setup, etc.)
 
-- [ ] **Step 4: Modify `http.ts`** — same `/health` gate as Task 4 Step 5.
+- [ ] **Step 1: Extend `kafka.test.ts` with the 5 kafka-side canary tests**
 
-- [ ] **Step 5: Modify `index.ts`** — same shutdown wiring as Task 4 Step 6, with notification-service's existing imports.
+Mirror order-service's `kafka.test.ts` block. The tests:
+- group-id resolution (sets `VERSION=canary`, asserts `kafka.consumer({groupId: "notification-service-canary"})`)
+- stable + canaryReady=true skips x-canary message (uses `_testIsCanaryReady: () => true`)
+- canary processes x-canary message
+- canary skips non-canary message
+- recordPoll is called for every message regardless of filter outcome
 
-Read the existing notification-service `index.ts` first; it has slightly different downstream clients than order-service. Preserve those.
+- [ ] **Step 2: Extend `http.test.ts` with the `/health` 503 test**
 
-- [ ] **Step 6: Run tests**
+Construct a `kafkaHealth` from `createKafkaHealthState(1)` (1ms timeout), record one poll, sleep 10ms, then make a request to `/health`. Expect 503 with `{ ok: false, kafka: ... }`.
+
+If `http.test.ts` does not exist, create it minimally — only this single test.
+
+- [ ] **Step 3: Run tests; confirm new tests fail**
+
+Run: `pnpm -F @canary/notification-service test`
+Expected: 6 new tests fail.
+
+- [ ] **Step 4: Modify `kafka.ts`** — apply Task 4 Step 4 structure with the substitutions above.
+
+- [ ] **Step 5: Modify `http.ts`** — `/health` gate exactly as Task 4 Step 5.
+
+- [ ] **Step 6: Modify `index.ts`** — pass `kafkaHealth: kafka.health`; SIGTERM/SIGINT handler that calls `presenceWatcher.close()` (unprotected, see refinement #1), `consumer.disconnect()` (await + catch), `producer.disconnect()` (await + catch), `server.close()`.
+
+- [ ] **Step 7: Run tests**
 
 Run: `pnpm -F @canary/notification-service test`
 Expected: All pass.
 
-- [ ] **Step 7: Build**
+- [ ] **Step 8: Build**
 
 Run: `pnpm -F @canary/notification-service build`
 Expected: tsc clean.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add services/notification-service/src/kafka.ts \
         services/notification-service/src/http.ts \
         services/notification-service/src/index.ts \
-        services/notification-service/src/__tests__/kafka.test.ts
+        services/notification-service/src/__tests__/kafka.test.ts \
+        services/notification-service/src/__tests__/http.test.ts
 git commit -m "feat(notification): wire Phase 2.b canary consumer (group resolver + filter + watcher + health)"
 ```
 
