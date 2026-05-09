@@ -160,3 +160,44 @@ make undeploy-services
 ```
 
 Next phase: 1.4 (canary-ctl + per-service VirtualService header rule for `x-canary: true`).
+
+## Plan 1.4 — canary-ctl + traffic-cli (complete)
+
+`canary-ctl` owns the per-service canary lifecycle (Helm release + VirtualService header-match rule + per-service state file). `traffic-cli` sends single requests to the edge with or without `x-canary: true`.
+
+### Quickstart
+
+```bash
+make up                                      # 1.1
+make build-services                          # 1.3.a
+make build-images && make load-images        # 1.3.b
+make deploy-services                         # 1.3.b
+
+# 1.4 commands:
+make canary-deploy SVC=payment-service TAG=dev    # creates payment-service-canary release + adds header rule
+make canary-status SVC=payment-service            # show state, helm release, VS rule, drift
+node tools/traffic-cli/bin/traffic-cli order --canary
+make canary-rollback SVC=payment-service          # remove header rule, drain, uninstall, clear state
+make smoke-canary                                 # bats test (~3 minutes against real cluster)
+```
+
+### canary-ctl commands
+
+| Command | Effect |
+|---|---|
+| `canary-ctl deploy-canary <svc> <tag>` | Helm install canary release + apply VS header rule. Auto-rollback on rollout failure. |
+| `canary-ctl rollback <svc>` | Header rule first, grace sleep, helm uninstall, clear state. Idempotent. |
+| `canary-ctl status <svc>` | Print state, helm release, VS rule presence, drift. `--json` for machine-readable. |
+| `canary-ctl reconcile <svc>` | Inspect (state × cluster) cross-product; complete deploy, finish rollback, or remove drift. |
+
+State files live at `~/.canary-ctl/<service>.json`. Override with `--state-dir`.
+
+### traffic-cli
+
+```bash
+traffic-cli order [--canary] [--user u1] [--sku sku-1] [--quantity 1] [--amount 100] [--url http://localhost:8080]
+```
+
+Sends one POST to the kind ingress. `--canary` adds `x-canary: true`. Verifying which subset *served* the request belongs to Plan 1.5's e2e harness — for 1.4 use Kiali (http://localhost:20001) to confirm by eye.
+
+Next phase: 1.5 (13 canonical acceptance scenarios).
