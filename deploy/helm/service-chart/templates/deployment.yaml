@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "service-chart.resourceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "service-chart.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "service-chart.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "service-chart.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.serviceName }}
+      containers:
+        - name: {{ .Values.serviceName }}
+          image: "{{ .Values.image.repository }}/{{ .Values.serviceName }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.ports.http }}
+            - name: restate
+              containerPort: {{ .Values.ports.restateHandler }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "service-chart.resourceName" . }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
