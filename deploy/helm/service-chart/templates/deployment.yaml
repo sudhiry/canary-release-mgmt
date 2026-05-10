@@ -14,6 +14,10 @@ spec:
     metadata:
       labels:
         {{- include "service-chart.labels" . | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "{{ .Values.ports.http }}"
+        prometheus.io/path: "/actuator/prometheus"
     spec:
       serviceAccountName: {{ .Values.serviceName }}
       containers:
