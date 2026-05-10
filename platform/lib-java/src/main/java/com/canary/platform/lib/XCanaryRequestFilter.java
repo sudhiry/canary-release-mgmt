@@ -44,11 +44,13 @@ public class XCanaryRequestFilter implements Filter, Ordered {
         } finally {
             Duration elapsed = Duration.ofNanos(System.nanoTime() - startNanos);
             String outcome = classify(response);
-            metrics.recordHttp(target, outcome, elapsed);
-
-            XCanaryContext.set(prior);
-            if (!prior) {
-                XCanaryContext.clear();
+            try {
+                metrics.recordHttp(target, outcome, elapsed);
+            } finally {
+                XCanaryContext.set(prior);
+                if (!prior) {
+                    XCanaryContext.clear();
+                }
             }
         }
     }
