@@ -11,6 +11,7 @@ const kafka = await setupKafka({
   brokers: config.KAFKA_BOOTSTRAP_SERVERS,
   consumersEnabled: config.KAFKA_CONSUMERS_ENABLED,
   producerEnabled: config.KAFKA_PRODUCER_ENABLED,
+  kafkaHealthTimeoutMs: config.KAFKA_HEALTH_TIMEOUT_MS,
 });
 
 const app = setupHttp({ ingressClient, kafkaHealth: kafka.health });
