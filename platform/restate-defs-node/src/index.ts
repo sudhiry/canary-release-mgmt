@@ -32,6 +32,7 @@ export interface Charge {
 
 export type PaymentVOMethods = {
   charge(req: ChargeRequest): Promise<Charge>;
+  refund(req: ChargeRequest): Promise<Charge>;
 };
 
 export const paymentVODef = {
@@ -60,6 +61,8 @@ export interface AvailabilityResponse {
 
 export type ReservationWorkflowMethods = {
   run(req: ReservationRequest): Promise<Reservation>;
+  confirm(): Promise<void>;
+  release(): Promise<void>;
 };
 
 export const reservationWorkflowDef = {

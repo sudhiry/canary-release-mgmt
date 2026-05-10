@@ -112,4 +112,17 @@ describe("NotificationService.notify handler", () => {
       expect.stringContaining(result.id),
     );
   });
+
+  it("notifyHandler throws TerminalError when userId is 'reject-me'", async () => {
+    const ctx = {
+      request: () => ({ headers: new Map<string, string>() }),
+      serviceClient: vi.fn(() => ({ append: vi.fn() })),
+    };
+    await expect(
+      notifyHandler(
+        ctx as unknown as import("@restatedev/restate-sdk").Context,
+        { userId: "reject-me", message: "x", orderId: "o_1" },
+      ),
+    ).rejects.toThrow(/rejected for test driver/);
+  });
 });

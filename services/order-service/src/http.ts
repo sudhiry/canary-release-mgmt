@@ -1,31 +1,21 @@
 import express, { type Express } from "express";
-import axios, { type AxiosInstance } from "axios";
+import type { AxiosInstance } from "axios";
 import {
   xCanaryMiddleware,
   xServedVersionMiddleware,
   xServedChainMiddleware,
-  attachXCanaryAxiosInterceptor,
-  attachXServedChainAxiosInterceptor,
   type KafkaHealthState,
 } from "@canary/lib-node";
 import type { Order, OrderRequest } from "@canary/restate-defs-node";
 import { orderStore, consumedEventStore } from "./store.js";
-import { runSaga, type SagaClients } from "./saga.js";
 import { randomUUID } from "node:crypto";
 
 export interface HttpDeps {
-  clients: SagaClients;
+  ingressClient: AxiosInstance;
   kafkaSend?: (topic: string, key: string, value: string) => Promise<void>;
   kafkaHealth?: KafkaHealthState;
   /** "stable" | "canary"; defaults to process.env.VERSION ?? "stable". Only canary's /health is gated on Kafka health. */
   version?: string;
-}
-
-export function buildClient(baseURL: string): AxiosInstance {
-  const client = axios.create({ baseURL });
-  attachXCanaryAxiosInterceptor(client);
-  attachXServedChainAxiosInterceptor(client);
-  return client;
 }
 
 export function setupHttp(deps: HttpDeps): Express {
@@ -51,32 +41,38 @@ export function setupHttp(deps: HttpDeps): Express {
 
   app.post("/api/orders", async (req, res) => {
     const body = req.body as OrderRequest;
+    // Generate orderId locally so we can include it in the Restate Ingress URL
+    // (the workflow key) — matches the Java pattern in inventory's
+    // ReservationController.create.
     const orderId = randomUUID();
 
-    const initial: Order = {
-      id: orderId,
-      userId: body.userId,
-      sku: body.sku,
-      quantity: body.quantity,
-      amount: body.amount,
-      status: "pending",
-    };
-    orderStore.put(initial);
-
-    if (deps.kafkaSend) {
-      await deps.kafkaSend("orders.events", orderId, JSON.stringify(initial));
-    }
-
     try {
-      await runSaga(orderId, body, deps.clients);
-      const completed: Order = { ...initial, status: "completed" };
-      orderStore.put(completed);
-      res.status(201).json(completed);
+      const result = await deps.ingressClient.post<Order>(
+        `/CheckoutSaga/${orderId}/run`,
+        body,
+      );
+      const order = result.data;
+      orderStore.put(order);
+      if (deps.kafkaSend) {
+        await deps.kafkaSend("orders.events", order.id, JSON.stringify(order));
+      }
+      if (order.status === "completed") {
+        res.status(201).json(order);
+      } else {
+        res.status(502).json({ error: "saga_failed", order });
+      }
     } catch (err) {
-      const failed: Order = { ...initial, status: "failed" };
+      console.error("ingress invocation failed", err);
+      const failed: Order = {
+        id: orderId,
+        userId: body.userId,
+        sku: body.sku,
+        quantity: body.quantity,
+        amount: body.amount,
+        status: "failed",
+      };
       orderStore.put(failed);
-      console.error("saga failed", err);
-      res.status(502).json({ error: "saga_failed", order: failed });
+      res.status(502).json({ error: "ingress_failed", order: failed });
     }
   });
 
