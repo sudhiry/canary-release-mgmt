@@ -11,12 +11,20 @@ import com.canary.platform.lib.XCanaryRestClientInterceptor;
 import com.canary.platform.lib.XCanaryRestateClientCustomizer;
 import com.canary.platform.lib.XServedChainResponseFilter;
 import com.canary.platform.lib.XServedChainRestClientInterceptor;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
+import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
+import org.springframework.kafka.core.ConsumerFactory;
+import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.web.client.RestClient;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
 
@@ -100,5 +108,41 @@ public class XCanaryAutoConfiguration {
             Optional<XCanaryPresenceWatcher> presenceWatcher) {
         return new XCanaryConsumeFilter(version,
                 () -> presenceWatcher.map(XCanaryPresenceWatcher::isCanaryReady).orElse(false));
+    }
+
+    // Spring Boot 4.0.4's KafkaAutoConfiguration no longer auto-creates
+    // either ConsumerFactory or kafkaListenerContainerFactory (regression
+    // from 3.x). Without both, @KafkaListener + @EnableKafka in services
+    // fails at startup with "No qualifying bean of type ConsumerFactory" /
+    // "No bean named 'kafkaListenerContainerFactory'". Surfaced during
+    // cluster verification of Phase 2.b — kafka-consumer-groups.sh --list
+    // showed zero Java consumer groups.
+    //
+    // Build both beans here. `auto.offset.reset = earliest` is critical
+    // for canary cold-start: a brand-new <svc>-canary consumer group joins
+    // at the LATEST offset by default, missing pre-warm messages produced
+    // before it joined → recordPoll never fires → readiness 503 forever.
+    // Earliest lets canary pick up the pre-warm trail and become Ready.
+
+    @Bean
+    @ConditionalOnMissingBean(ConsumerFactory.class)
+    public ConsumerFactory<Object, Object> kafkaConsumerFactory(
+            @Value("${spring.kafka.bootstrap-servers:${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}}") String bootstrapServers) {
+        Map<String, Object> props = new HashMap<>();
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        return new DefaultKafkaConsumerFactory<>(props);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(name = "kafkaListenerContainerFactory")
+    public ConcurrentKafkaListenerContainerFactory<Object, Object> kafkaListenerContainerFactory(
+            ConsumerFactory<Object, Object> consumerFactory) {
+        ConcurrentKafkaListenerContainerFactory<Object, Object> factory =
+                new ConcurrentKafkaListenerContainerFactory<>();
+        factory.setConsumerFactory(consumerFactory);
+        return factory;
     }
 }
