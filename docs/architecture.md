@@ -96,6 +96,60 @@ Versions are pinned at the top of [Makefile](../Makefile). Restate
 server 1.6.2 is wire-compatible with the Java SDK 2.7.0 and the Node SDK
 1.14.2 — do not bump the server pin without testing both SDKs.
 
+## Network topology
+
+How K8s namespaces, per-subset Services, and the two cluster-edge port
+mappings line up. `payment-service` is shown with both subsets to
+illustrate the pattern — every service has the same shape after a
+canary is deployed.
+
+```mermaid
+graph TB
+    Developer["Developer laptop"]
+
+    subgraph kind["kind cluster (Docker)"]
+        subgraph istio_system["namespace: istio-system"]
+            Gateway["istio-ingressgateway<br/>(maps :80)"]
+        end
+
+        subgraph services_ns["namespace: services"]
+            subgraph svc_payment["payment-service<br/>DestinationRule subsets"]
+                PStable["pod: version=stable"]
+                PCanary["pod: version=canary"]
+            end
+            PSvcStable["Service:<br/>payment-service-stable"]
+            PSvcCanary["Service:<br/>payment-service-canary"]
+            PSvcDefault["Service:<br/>payment-service<br/>(selects both subsets)"]
+        end
+
+        subgraph kafka_ns["namespace: kafka"]
+            KafkaBroker["my-cluster-kafka-bootstrap:9092"]
+        end
+
+        subgraph restate_ns["namespace: restate"]
+            RestateSvc["restate.restate:9070"]
+        end
+    end
+
+    Developer -- "localhost:8080" --> Gateway
+    Developer -- "localhost:9070<br/>(port-forward)" --> RestateSvc
+    Gateway -- "VirtualService<br/>(canary-by-header)" --> PSvcDefault
+    PStable -. selects .- PSvcStable
+    PStable -. selects .- PSvcDefault
+    PCanary -. selects .- PSvcCanary
+    PCanary -. selects .- PSvcDefault
+    RestateSvc -- "dispatch *Stable handlers" --> PSvcStable
+    RestateSvc -- "dispatch *Canary handlers" --> PSvcCanary
+    PStable -- "produce/consume" --> KafkaBroker
+    PCanary -- "produce/consume" --> KafkaBroker
+```
+
+Restate's dispatch path bypasses Istio's DestinationRule subsetting
+because Restate's pods sit outside the Istio mesh. The per-subset K8s
+Services (`<svc>-stable` / `<svc>-canary`) give Restate variant-isolated
+URLs to register against — see [canary-mechanics.md](canary-mechanics.md#restate-path)
+for the Phase 3.b β routing details.
+
 ## The five services
 
 All deployed to the `services` namespace, behind an Istio sidecar.
