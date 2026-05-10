@@ -284,7 +284,7 @@ describe("setupKafka — Phase 2.b canary integration", () => {
     expect(recordPollSpy).toHaveBeenCalledTimes(3);
   });
 
-  it("/health returns 503 when kafka health state is stale", async () => {
+  it("/health on CANARY returns 503 when kafka health state is stale", async () => {
     const { createKafkaHealthState } = await import("@canary/lib-node");
     // Create a health state with 1ms timeout, record a poll, then let it go stale.
     const staleHealth = createKafkaHealthState(1);
@@ -297,7 +297,7 @@ describe("setupKafka — Phase 2.b canary integration", () => {
       notification: { post: vi.fn() } as unknown as AxiosInstance,
     };
 
-    const app = setupHttp({ clients: mockClients, kafkaHealth: staleHealth });
+    const app = setupHttp({ clients: mockClients, kafkaHealth: staleHealth, version: "canary" });
     const res = await request(app).get("/health");
     expect(res.status).toBe(503);
     expect(res.body.ok).toBe(false);
