@@ -14,6 +14,7 @@ import dev.restate.common.Target;
 import dev.restate.sdk.Context;
 import dev.restate.sdk.ObjectContext;
 import dev.restate.sdk.common.StateKey;
+import dev.restate.sdk.common.TerminalException;
 import dev.restate.serde.TypeTag;
 import org.springframework.kafka.core.KafkaTemplate;
 
@@ -27,7 +28,8 @@ import java.util.UUID;
  *
  * <p>Idempotency: uses a {@link StateKey} named "charge" to persist the first
  * successful Charge. Subsequent calls for the same key return the existing charge
- * without re-processing.
+ * without re-processing. {@code refund} flips status to {@code "refunded"} and
+ * {@code charge} refuses to recharge a refunded order (cross-handler invariant).
  *
  * <p>Restate-to-Restate audit fan-out: after writing state the handler invokes
  * {@code AuditQueryService.append} via a durable {@link Request}, stamping
@@ -55,10 +57,14 @@ public class PaymentVOImpl extends PaymentVO {
     public Charge charge(ChargeRequest req) {
         ObjectContext ctx = (ObjectContext) Context.current();
 
-        // Idempotency: return existing charge if already processed for this orderId.
         Optional<Charge> existing = ctx.get(CHARGE_STATE);
         if (existing.isPresent()) {
-            return existing.get();
+            Charge prior = existing.get();
+            if ("refunded".equals(prior.status())) {
+                throw new TerminalException("order already refunded; cannot recharge");
+            }
+            // Idempotent re-entry on a still-succeeded charge.
+            return prior;
         }
 
         Charge charge = new Charge(
@@ -69,25 +75,50 @@ public class PaymentVOImpl extends PaymentVO {
         );
         ctx.set(CHARGE_STATE, charge);
         store.put(charge);
+        emitPaymentsEvent(charge);
+        callAudit(ctx, "charged", charge.id(), req.orderId());
+        return charge;
+    }
 
-        // Emit Kafka event to payments.events
+    @Override
+    public Charge refund(ChargeRequest req) {
+        ObjectContext ctx = (ObjectContext) Context.current();
+
+        Optional<Charge> existing = ctx.get(CHARGE_STATE);
+        if (existing.isEmpty()) {
+            throw new TerminalException("no charge to refund for orderId=" + req.orderId());
+        }
+
+        Charge prior = existing.get();
+        if ("refunded".equals(prior.status())) {
+            // Idempotent re-entry: nothing to do.
+            return prior;
+        }
+
+        Charge refunded = new Charge(prior.id(), prior.orderId(), prior.amount(), "refunded");
+        ctx.set(CHARGE_STATE, refunded);
+        store.put(refunded);
+        emitPaymentsEvent(refunded);
+        callAudit(ctx, "refunded", refunded.id(), refunded.orderId());
+        return refunded;
+    }
+
+    private void emitPaymentsEvent(Charge charge) {
         try {
             kafkaTemplate.send("payments.events", charge.id(), objectMapper.writeValueAsString(charge));
         } catch (JsonProcessingException e) {
             throw new RuntimeException("Failed to serialize Charge", e);
         }
+    }
 
-        // Restate-to-Restate: append audit event. Customizer stamps x-canary on headers
-        // when the calling thread is in canary context.
+    private void callAudit(ObjectContext ctx, String action, String chargeId, String orderId) {
         InvocationOptions opts = canary.apply(InvocationOptions.builder());
         var auditReq = Request.of(
                 Target.service("AuditQueryService", "append"),
                 TypeTag.of(AuditEvent.class),
                 TypeTag.of(Void.class),
-                new AuditEvent("payment", charge.id(), "charged", req.orderId())
+                new AuditEvent("payment", chargeId, action, orderId)
             ).headers(opts.getHeaders());
         ctx.call(auditReq);
-
-        return charge;
     }
 }

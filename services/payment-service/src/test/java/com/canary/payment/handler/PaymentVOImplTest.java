@@ -22,6 +22,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -128,5 +129,64 @@ class PaymentVOImplTest {
         verify(kafkaTemplate).send(eq("payments.events"), keyCap.capture(), valueCap.capture());
         assertThat(keyCap.getValue()).isEqualTo(result.id());
         assertThat(objectMapper.readValue(valueCap.getValue(), Charge.class)).isEqualTo(result);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void refundFlipsStateToRefundedAndEmitsKafkaEvent() throws Exception {
+        Charge existing = new Charge("c_1", "ord_1", 100L, "succeeded");
+        when(ctx.get(any())).thenReturn(java.util.Optional.of(existing));
+        when(ctx.call(any(Request.class))).thenReturn(mock(CallDurableFuture.class));
+
+        Charge result = handler.refund(new ChargeRequest("ord_1", 100L));
+
+        assertThat(result.status()).isEqualTo("refunded");
+        // Verify state was written back as refunded
+        var stateValueCap = ArgumentCaptor.forClass(Charge.class);
+        verify(ctx).set(any(), stateValueCap.capture());
+        assertThat(stateValueCap.getValue().status()).isEqualTo("refunded");
+
+        // Verify Kafka refund event emitted
+        var keyCap = ArgumentCaptor.forClass(String.class);
+        var valueCap = ArgumentCaptor.forClass(String.class);
+        verify(kafkaTemplate).send(eq("payments.events"), keyCap.capture(), valueCap.capture());
+        assertThat(keyCap.getValue()).isEqualTo("c_1");
+        Charge persisted = objectMapper.readValue(valueCap.getValue(), Charge.class);
+        assertThat(persisted.status()).isEqualTo("refunded");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void refundIsIdempotentWhenAlreadyRefunded() {
+        Charge alreadyRefunded = new Charge("c_1", "ord_1", 100L, "refunded");
+        when(ctx.get(any())).thenReturn(java.util.Optional.of(alreadyRefunded));
+
+        Charge result = handler.refund(new ChargeRequest("ord_1", 100L));
+
+        // Same Charge returned, no state write, no Kafka emit, no audit call
+        assertThat(result.status()).isEqualTo("refunded");
+        assertThat(result.id()).isEqualTo("c_1");
+        verify(ctx, org.mockito.Mockito.never()).set(any(), any());
+        verify(kafkaTemplate, org.mockito.Mockito.never()).send(any(String.class), any(), any());
+        verify(ctx, org.mockito.Mockito.never()).call(any(Request.class));
+    }
+
+    @Test
+    void refundOnUnchargedOrderThrowsTerminalException() {
+        when(ctx.get(any())).thenReturn(java.util.Optional.empty());
+
+        assertThatThrownBy(() -> handler.refund(new ChargeRequest("ord_1", 100L)))
+            .isInstanceOf(dev.restate.sdk.common.TerminalException.class)
+            .hasMessageContaining("no charge to refund");
+    }
+
+    @Test
+    void chargeAfterRefundThrowsTerminalException() {
+        Charge alreadyRefunded = new Charge("c_1", "ord_1", 100L, "refunded");
+        when(ctx.get(any())).thenReturn(java.util.Optional.of(alreadyRefunded));
+
+        assertThatThrownBy(() -> handler.charge(new ChargeRequest("ord_1", 100L)))
+            .isInstanceOf(dev.restate.sdk.common.TerminalException.class)
+            .hasMessageContaining("already refunded");
     }
 }
