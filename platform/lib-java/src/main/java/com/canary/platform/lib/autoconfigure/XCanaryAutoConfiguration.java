@@ -130,24 +130,42 @@ public class XCanaryAutoConfiguration {
     // ConsumerAwareRebalanceListener on the listener container factory's
     // ContainerProperties; spring-kafka invokes it directly on the
     // consumer thread when the broker assigns or revokes partitions.
+    // Override the 2-arg (consumer-aware) callbacks only — NOT the 1-arg
+    // variants. The spring-kafka 4.0.4 dispatcher
+    // (KafkaMessageListenerContainer$ListenerConsumer$ListenerConsumerRebalanceListener)
+    // invokes BOTH the consumer-aware (2-arg) variant AND the user-listener
+    // (1-arg) variant for onPartitionsAssigned and onPartitionsLost when the
+    // same instance is referenced by both fields, because the 2-arg default
+    // delegates to the 1-arg. Overriding only the 2-arg variants here keeps
+    // the indicator callback firing exactly once per rebalance.
     @Bean
     public ConsumerAwareRebalanceListener kafkaConsumerRebalanceListener(
             KafkaConsumerHealthIndicator indicator) {
         return new ConsumerAwareRebalanceListener() {
             @Override
-            public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
+            public void onPartitionsAssigned(org.apache.kafka.clients.consumer.Consumer<?, ?> consumer,
+                                             Collection<TopicPartition> partitions) {
+                // Filter empty assigns: the broker can fire onPartitionsAssigned with
+                // an empty collection during initial join; flipping the indicator to
+                // assigned=true at that point would falsely report Ready before any
+                // partitions actually belong to this consumer.
                 if (!partitions.isEmpty()) {
                     indicator.onPartitionsAssigned();
                 }
             }
 
             @Override
-            public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
+            public void onPartitionsRevokedBeforeCommit(org.apache.kafka.clients.consumer.Consumer<?, ?> consumer,
+                                                       Collection<TopicPartition> partitions) {
                 indicator.onPartitionsRevoked();
             }
 
             @Override
-            public void onPartitionsLost(Collection<TopicPartition> partitions) {
+            public void onPartitionsLost(org.apache.kafka.clients.consumer.Consumer<?, ?> consumer,
+                                         Collection<TopicPartition> partitions) {
+                // Lost = broker fenced us (missed heartbeats). Same end state as revoked
+                // for the indicator; treat as unassigned. (See I2 review note: distinct
+                // diagnostic state for "lost" vs "revoked" is a future enhancement.)
                 indicator.onPartitionsRevoked();
             }
         };
