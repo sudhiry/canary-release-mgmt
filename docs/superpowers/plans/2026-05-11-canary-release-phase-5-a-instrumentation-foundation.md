@@ -62,9 +62,9 @@
 Edit `gradle/libs.versions.toml`. Under `[versions]` add:
 
 ```toml
-micrometerTracing = "1.5.4"
+micrometerTracing = "1.5.0"
 opentelemetry = "1.51.0"
-opentelemetryInstrumentation = "2.21.1"
+opentelemetryInstrumentation = "2.16.0"
 ```
 
 Under `[libraries]` add:
@@ -75,10 +75,10 @@ opentelemetry-exporter-otlp       = { module = "io.opentelemetry:opentelemetry-e
 opentelemetry-spring-boot-starter = { module = "io.opentelemetry.instrumentation:opentelemetry-spring-boot-starter", version.ref = "opentelemetryInstrumentation" }
 ```
 
-Pin notes:
-- Micrometer Tracing 1.5.x is the line that ships with Spring Boot 4.0.x (Boot 4.0.4 BOM imports `micrometer-tracing-bom:1.5.4`). Pinning explicitly avoids surprise upgrades.
-- OpenTelemetry Java 1.51.0 is the latest stable as of 2026-Q1 and is BOM-compatible with the Micrometer 1.5.x bridge.
-- OTel Spring Boot starter 2.21.1 is its own BOM line; verify no conflict with the existing `spring-boot-dependencies:4.0.4` BOM by running the tests in subsequent tasks.
+Pin notes (verified against Maven Central on 2026-05-11):
+- `io.micrometer:micrometer-tracing-bridge-otel:1.5.0` is the latest 1.5.x stable. Spring Boot 4.0.4 ships micrometer-tracing-bom 1.5.x; the 1.5.0 patch pin is the most current 1.5.x available.
+- `io.opentelemetry:opentelemetry-exporter-otlp:1.51.0` is the latest stable and is BOM-compatible with the Micrometer 1.5.x bridge.
+- `io.opentelemetry.instrumentation:opentelemetry-spring-boot-starter:2.16.0` is the latest stable. The 2.x line is its own BOM; verify no conflict with `spring-boot-dependencies:4.0.4` by running the tests in subsequent tasks.
 
 - [ ] **Step 1.2: Verify the catalog parses**
 
