@@ -103,6 +103,44 @@ response:
   reading the response header from RestClient/axios calls. Test code uses
   this to verify multi-hop routing without Jaeger.
 
+### 5. Full request sequence (Restate-orchestrated, Phase 3.a)
+
+Since Phase 3.a, the `/api/orders` saga is durable: the order-service
+HTTP controller submits to the Restate Ingress, and the
+`CheckoutSaga{Stable,Canary}` handler (running in the order-service pod
+itself) drives the inventory → payment → notification calls.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Client
+    participant Gateway as Istio Gateway
+    participant OrderCtl as order-service-canary<br/>HTTP controller
+    participant RestateI as Restate Ingress
+    participant Saga as CheckoutSagaCanary<br/>(handler in order-service-canary)
+    participant Inv as inventory-service
+    participant Pay as payment-service
+    participant Notif as notification-service
+
+    Client->>Gateway: POST /api/orders<br/>x-canary: true
+    Gateway->>OrderCtl: route via canary-by-header rule
+    OrderCtl->>OrderCtl: read x-canary → pick CheckoutSagaCanary
+    OrderCtl->>RestateI: POST /CheckoutSagaCanary/{id}/run
+    RestateI->>Saga: dispatch to registered URL<br/>(order-service-canary:9084)
+    Saga->>Inv: POST /reservations (axios, x-canary stamped)
+    Inv-->>Saga: reserved + x-served-version
+    Saga->>Pay: POST /charges (axios, x-canary stamped)
+    Pay-->>Saga: charged + x-served-version
+    Saga->>Notif: POST /notifications (axios, x-canary stamped)
+    Notif-->>Saga: notified + x-served-version
+    Saga-->>RestateI: completed
+    RestateI-->>OrderCtl: 200 OK
+    OrderCtl-->>Client: 201 Created<br/>x-served-chain accumulated
+```
+
+Without the header, the controller picks `CheckoutSagaStable` and the
+exact same flow runs through the stable subsets at each hop.
+
 ## Kafka path
 
 ### Per-subset consumer groups
