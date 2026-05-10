@@ -47,7 +47,7 @@ class ReservationControllerTest {
     @Test
     void postDelegatesToWorkflowViaIngress() throws Exception {
         var req = new ReservationRequest("SKU-A", 5, "ord_42");
-        var returned = new Reservation("res_1", "SKU-A", 5, "ord_42", "reserved");
+        var returned = new Reservation("res_1", "SKU-A", 5, "ord_42", "reserved", 0);
 
         var uriSpec = mock(RestClient.RequestBodyUriSpec.class);
         var bodySpec = mock(RestClient.RequestBodySpec.class);

@@ -5,7 +5,6 @@ import com.canary.platform.lib.XCanaryRestateClientCustomizer;
 import com.canary.restate.audit.AuditEvent;
 import com.canary.restate.inventory.Reservation;
 import com.canary.restate.inventory.ReservationRequest;
-import com.canary.restate.inventory.ReservationWorkflow;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.restate.common.InvocationOptions;
@@ -25,7 +24,15 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Reservation workflow with awakeable-driven lifecycle.
+ * Shared logic for the reservation workflow. Not a Restate handler binding —
+ * thin delegate subclasses ({@link ReservationWorkflowImplStable},
+ * {@link ReservationWorkflowImplCanary}) extend the appropriate abstract class
+ * and forward every call here.
+ *
+ * <p>The {@code isCanary} flag controls {@link #withVariant(Reservation)}: stable
+ * returns {@code bufferUnits=0}; canary returns {@code bufferUnits=1}. State
+ * persisted to Restate always uses {@code bufferUnits=0}; the variant stamp is
+ * applied only on return paths.
  *
  * <p>Lifecycle:
  * <ul>
@@ -39,52 +46,42 @@ import java.util.UUID;
  *       {@link TerminalException} from {@code await()}; we treat that as
  *       {@code expired}.
  * </ul>
- *
- * <p>Each {@code run()} emits two Kafka events on {@code inventory.events}: the
- * initial {@code reserved} state and the terminal state. Two audit calls fire
- * (once at {@code reserved}, once at the terminal status).
- *
- * <p>The shared handlers {@link #confirm()} / {@link #release()} look up the
- * stored awakeable id and resolve it via
- * {@code ctx.awakeableHandle(id).resolve(TypeTag.of(String.class), value)}. When
- * the state has already been cleared (workflow terminated) they throw
- * {@link TerminalException}.
- *
- * <p>Note on SDK API: Restate Java SDK 2.7.0 does not expose a
- * {@code resolveAwakeable(id, value)} convenience on {@code SharedWorkflowContext};
- * resolution is via {@link dev.restate.sdk.AwakeableHandle#resolve(TypeTag, Object)}.
- * Likewise, the "park on awakeable or timer" idiom uses
- * {@link dev.restate.sdk.DurableFuture#withTimeout(Duration)} rather than the
- * {@code Select.from(...)} helper sketched in early design notes.
  */
-public class ReservationWorkflowImpl extends ReservationWorkflow {
+public class ReservationWorkflowCore {
 
     private static final Duration EXPIRY = Duration.ofSeconds(120);
     private static final TypeTag<String> STRING_TAG = TypeTag.of(String.class);
     private static final StateKey<String> AWAKEABLE_ID =
         StateKey.of("awakeableId", String.class);
+    private static final StateKey<Reservation> CURRENT_RESERVATION =
+        StateKey.of("currentReservation", Reservation.class);
 
     private final ReservationStore store;
     private final XCanaryRestateClientCustomizer canary;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
+    private final boolean isCanary;
 
-    public ReservationWorkflowImpl(ReservationStore store, XCanaryRestateClientCustomizer canary,
-                                   KafkaTemplate<String, String> kafkaTemplate, ObjectMapper objectMapper) {
+    public ReservationWorkflowCore(ReservationStore store,
+                                   XCanaryRestateClientCustomizer canary,
+                                   KafkaTemplate<String, String> kafkaTemplate,
+                                   ObjectMapper objectMapper,
+                                   boolean isCanary) {
         this.store = store;
         this.canary = canary;
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
+        this.isCanary = isCanary;
     }
 
-    @Override
     public Reservation run(ReservationRequest req) {
         WorkflowContext ctx = (WorkflowContext) Context.current();
 
-        // Initial state: reserved.
+        // Initial state: reserved. Store with bufferUnits=0 (variant-agnostic in state).
         Reservation reserved = new Reservation(
-            UUID.randomUUID().toString(), req.sku(), req.quantity(), req.orderId(), "reserved");
+            UUID.randomUUID().toString(), req.sku(), req.quantity(), req.orderId(), "reserved", 0);
         store.put(reserved);
+        ctx.set(CURRENT_RESERVATION, reserved);
         emitInventoryEvent(reserved);
         callAudit(ctx, "reserved", reserved.id(), req.orderId());
 
@@ -103,6 +100,7 @@ public class ReservationWorkflowImpl extends ReservationWorkflow {
         // Workflow terminated: clear the awakeable id so late confirm/release calls
         // see the empty state and reject with TerminalException.
         ctx.clear(AWAKEABLE_ID);
+        ctx.clear(CURRENT_RESERVATION);
 
         String terminalStatus;
         if ("confirm".equals(outcome)) {
@@ -113,25 +111,30 @@ public class ReservationWorkflowImpl extends ReservationWorkflow {
             terminalStatus = "expired";
         }
 
+        // Store with bufferUnits=0 (variant-agnostic in state).
         Reservation terminal = new Reservation(
-            reserved.id(), reserved.sku(), reserved.quantity(), reserved.orderId(), terminalStatus);
+            reserved.id(), reserved.sku(), reserved.quantity(), reserved.orderId(), terminalStatus, 0);
         store.put(terminal);
         emitInventoryEvent(terminal);
         callAudit(ctx, terminalStatus, terminal.id(), req.orderId());
-        return terminal;
+        return withVariant(terminal);
     }
 
-    @Override
-    public void confirm() {
+    public Reservation confirm() {
         SharedWorkflowContext ctx = (SharedWorkflowContext) Context.current();
         Optional<String> id = ctx.get(AWAKEABLE_ID);
         if (id.isEmpty()) {
             throw new TerminalException("reservation not in confirmable state");
         }
         ctx.awakeableHandle(id.get()).resolve(STRING_TAG, "confirm");
+        // Read current reservation state and return with variant stamp.
+        Optional<Reservation> current = ctx.get(CURRENT_RESERVATION);
+        Reservation base = current.orElseThrow(() ->
+            new TerminalException("reservation state not found after confirm signal"));
+        return withVariant(new Reservation(
+            base.id(), base.sku(), base.quantity(), base.orderId(), "confirmed", 0));
     }
 
-    @Override
     public void release() {
         SharedWorkflowContext ctx = (SharedWorkflowContext) Context.current();
         Optional<String> id = ctx.get(AWAKEABLE_ID);
@@ -141,15 +144,27 @@ public class ReservationWorkflowImpl extends ReservationWorkflow {
         ctx.awakeableHandle(id.get()).resolve(STRING_TAG, "release");
     }
 
+    /**
+     * Stamps the variant-specific bufferUnits onto a Reservation before returning
+     * to the caller. State is always stored with bufferUnits=0; this is applied
+     * only on return paths.
+     */
+    private Reservation withVariant(Reservation r) {
+        return new Reservation(r.id(), r.sku(), r.quantity(), r.orderId(), r.status(),
+                               isCanary ? 1 : 0);
+    }
+
     private void emitInventoryEvent(Reservation reservation) {
         try {
-            kafkaTemplate.send("inventory.events", reservation.id(), objectMapper.writeValueAsString(reservation));
+            kafkaTemplate.send("inventory.events", reservation.id(),
+                objectMapper.writeValueAsString(reservation));
         } catch (JsonProcessingException e) {
             throw new RuntimeException("Failed to serialize Reservation", e);
         }
     }
 
-    private void callAudit(WorkflowContext ctx, String action, String reservationId, String orderId) {
+    private void callAudit(WorkflowContext ctx, String action, String reservationId,
+                           String orderId) {
         InvocationOptions opts = canary.apply(InvocationOptions.builder());
         var auditReq = Request.of(
                 Target.service("AuditQueryService", "append"),

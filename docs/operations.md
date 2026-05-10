@@ -279,11 +279,31 @@ an event's shape. Tracked separately; brainstorming the registry +
 wire-format choice (Confluent / Apicurio / Karapace, JSON / Avro /
 Protobuf) is its own session.
 
-### Restate canary handler versioning (Phase 3)
+### Restate canary handler versioning (Phase 3.b)
 
-Restate handler registration is currently stable-only — the canary's
-`canary-overlay.yaml` sets `RESTATE_REGISTER_HANDLERS=false`. Phase 3
-designs the handler-versioning protocol for durable executions to remain
-safe across handler-shape changes. Until then, services that materially
-change their Restate handlers cannot be canaried; ship a bumped stable
-release instead.
+Both stable and canary register their Restate handlers, but under
+*distinct* service names: `CheckoutSagaStable` / `CheckoutSagaCanary`,
+`ReservationWorkflowStable` / `ReservationWorkflowCanary`, etc. The
+HTTP controller in order-service reads the incoming `x-canary` header
+and posts to `/CheckoutSaga<Stable|Canary>/<orderId>/run` via the
+Restate Ingress; Restate dispatches each invocation to the registered
+deployment URL for that service name. Per-subset K8s Services
+(`<svc>-stable` / `<svc>-canary`) provide the variant-isolated URLs
+Restate uses, since Restate's pods sit outside the Istio mesh and
+cannot apply DestinationRule subset routing.
+
+Each canary handler ships one observable behavioral tweak so test
+assertions are falsifiable: `Order.auditTrail` includes a per-hop
+`<svc>@canary` entry, `Reservation.bufferUnits=1`, `Charge.amount`
+applies a 1% discount, `NotifyResult.deliveredMessage` is suffixed with
+`[via canary notifier]`. End-to-end isolation is enforced by three
+independent layers (registration, in-saga client construction, K8s
+endpoint selection) — a `*Canary` invocation cannot reach a stable
+handler.
+
+The trade-off: in-flight invocations on a torn-down canary deployment
+retry indefinitely. Operator runbook for canary teardown: stop new
+flagged traffic at Istio, drain in-flights via Restate Admin, DELETE
+the canary deployment from Restate, then `helm uninstall` the canary
+release. See the Phase 3.b spec at
+`docs/superpowers/specs/2026-05-11-canary-release-phase-3-b-canary-handler-versioning-design.md`.

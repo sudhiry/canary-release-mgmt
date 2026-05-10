@@ -62,6 +62,7 @@ public record Reservation(
 package com.canary.restate.inventory;
 
 import dev.restate.sdk.annotation.Handler;
+import dev.restate.sdk.annotation.Name;
 import dev.restate.sdk.annotation.Shared;
 import dev.restate.sdk.annotation.Workflow;
 
@@ -73,7 +74,8 @@ import dev.restate.sdk.annotation.Workflow;
  * <p>Lifecycle is identical to the canary variant; only the registered service
  * name differs. Implementations delegate to {@code ReservationWorkflowCore}.
  */
-@Workflow(name = "ReservationWorkflowStable")
+@Workflow
+@Name("ReservationWorkflowStable")
 public abstract class ReservationWorkflowStable {
     @Handler
     public abstract Reservation run(ReservationRequest req);
@@ -93,6 +95,7 @@ public abstract class ReservationWorkflowStable {
 package com.canary.restate.inventory;
 
 import dev.restate.sdk.annotation.Handler;
+import dev.restate.sdk.annotation.Name;
 import dev.restate.sdk.annotation.Shared;
 import dev.restate.sdk.annotation.Workflow;
 
@@ -101,7 +104,8 @@ import dev.restate.sdk.annotation.Workflow;
  * in the registered service name. Canary impl returns Reservation with
  * bufferUnits=1 to signal the canary tweak.
  */
-@Workflow(name = "ReservationWorkflowCanary")
+@Workflow
+@Name("ReservationWorkflowCanary")
 public abstract class ReservationWorkflowCanary {
     @Handler
     public abstract Reservation run(ReservationRequest req);
@@ -151,6 +155,7 @@ git commit -m "feat(restate-defs-java): split ReservationWorkflow into Stable/Ca
 package com.canary.restate.payment;
 
 import dev.restate.sdk.annotation.Handler;
+import dev.restate.sdk.annotation.Name;
 import dev.restate.sdk.annotation.VirtualObject;
 
 /**
@@ -160,7 +165,8 @@ import dev.restate.sdk.annotation.VirtualObject;
  * <p>Behavior identical to canary except {@code charge.amount} reflects the full
  * requested amount (canary applies 1% discount).
  */
-@VirtualObject(name = "PaymentVOStable")
+@VirtualObject
+@Name("PaymentVOStable")
 public abstract class PaymentVOStable {
     @Handler
     public abstract Charge charge(ChargeRequest req);
@@ -177,9 +183,11 @@ public abstract class PaymentVOStable {
 package com.canary.restate.payment;
 
 import dev.restate.sdk.annotation.Handler;
+import dev.restate.sdk.annotation.Name;
 import dev.restate.sdk.annotation.VirtualObject;
 
-@VirtualObject(name = "PaymentVOCanary")
+@VirtualObject
+@Name("PaymentVOCanary")
 public abstract class PaymentVOCanary {
     @Handler
     public abstract Charge charge(ChargeRequest req);

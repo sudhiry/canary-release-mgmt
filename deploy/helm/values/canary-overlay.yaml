@@ -1,9 +1,12 @@
 # Canary overlay — applied IN ADDITION to a per-service values file by
-# Plan 1.4's canary-ctl. Hard-codes the Phase 2.b canary contract:
+# Plan 1.4's canary-ctl. Phase 3.b: canary now registers Restate handlers
+# under variant-suffixed service names (CheckoutSagaCanary, etc.). Both
+# stable and canary register independently with no "latest wins" race.
 #   - canary pods DO consume Kafka (per-subset consumer group <svc>-canary)
-#   - canary pods do not register Restate handlers (only stable owns the registry)
+#   - canary pods DO register Restate handlers (Phase 3.b — was disabled in 3.a)
 #   - canary pods carry the version: canary label so Istio's DestinationRule
-#     subset routing can target them
+#     subset routing can target them (HTTP) and the per-subset K8s Service
+#     `<svc>-canary` selects them (Restate dispatch)
 #
 # Plan 1.4 runs roughly:
 #   helm upgrade --install <svc>-canary deploy/helm/service-chart \
@@ -15,7 +18,8 @@ version: canary
 replicas: 1
 env:
   KAFKA_CONSUMERS_ENABLED: "true"
-  RESTATE_REGISTER_HANDLERS: "false"
+  # RESTATE_REGISTER_HANDLERS removed; canary now registers handlers (Phase 3.b).
+  # Default from values.yaml ("true") applies.
   # Canary-only readiness gating: kafkaConsumer indicator must report UP
   # (i.e. consumer joined + heartbeat fresh within
   # canary.kafka-heartbeat-stale-ms; default 15s). When canary's consumer
@@ -25,4 +29,4 @@ env:
   # flagged event. Stable does NOT have this gating — see application.yml.
   MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: "readinessState,kafkaConsumer"
 restate:
-  registerEndpoint: false
+  registerEndpoint: true   # canary now runs the post-install registration Job (Phase 3.b)

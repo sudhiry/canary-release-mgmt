@@ -5,7 +5,6 @@ import com.canary.platform.lib.XCanaryRestateClientCustomizer;
 import com.canary.restate.audit.AuditEvent;
 import com.canary.restate.payment.Charge;
 import com.canary.restate.payment.ChargeRequest;
-import com.canary.restate.payment.PaymentVO;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.restate.common.InvocationOptions;
@@ -22,9 +21,15 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Restate VirtualObject handler for payment processing. Keyed by orderId; Restate
- * guarantees per-key serialization so calls with the same orderId run sequentially
- * through the same VO instance.
+ * Shared logic for payment processing. Not a Restate handler binding —
+ * thin delegate subclasses ({@link PaymentVOImplStable}, {@link PaymentVOImplCanary})
+ * extend the appropriate abstract class and forward every call here.
+ *
+ * <p>The {@code isCanary} flag controls {@link #charge}: canary applies a 1%
+ * discount ({@code (amount * 99) / 100}) while stable charges the full amount.
+ * The {@code refund} path reads the prior charge's amount from state; since the
+ * amount already reflects the variant-specific value, no isCanary branch is
+ * needed there.
  *
  * <p>Idempotency: uses a {@link StateKey} named "charge" to persist the first
  * successful Charge. Subsequent calls for the same key return the existing charge
@@ -35,7 +40,7 @@ import java.util.UUID;
  * {@code AuditQueryService.append} via a durable {@link Request}, stamping
  * {@code x-canary} via {@link XCanaryRestateClientCustomizer}.
  */
-public class PaymentVOImpl extends PaymentVO {
+public class PaymentVOCore {
 
     private static final StateKey<Charge> CHARGE_STATE =
         StateKey.of("charge", Charge.class);
@@ -44,16 +49,18 @@ public class PaymentVOImpl extends PaymentVO {
     private final XCanaryRestateClientCustomizer canary;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final ObjectMapper objectMapper;
+    private final boolean isCanary;
 
-    public PaymentVOImpl(ChargeStore store, XCanaryRestateClientCustomizer canary,
-                         KafkaTemplate<String, String> kafkaTemplate, ObjectMapper objectMapper) {
+    public PaymentVOCore(ChargeStore store, XCanaryRestateClientCustomizer canary,
+                         KafkaTemplate<String, String> kafkaTemplate, ObjectMapper objectMapper,
+                         boolean isCanary) {
         this.store = store;
         this.canary = canary;
         this.kafkaTemplate = kafkaTemplate;
         this.objectMapper = objectMapper;
+        this.isCanary = isCanary;
     }
 
-    @Override
     public Charge charge(ChargeRequest req) {
         ObjectContext ctx = (ObjectContext) Context.current();
 
@@ -67,10 +74,11 @@ public class PaymentVOImpl extends PaymentVO {
             return prior;
         }
 
+        long actualAmount = isCanary ? (req.amount() * 99L) / 100L : req.amount();
         Charge charge = new Charge(
             UUID.randomUUID().toString(),
             req.orderId(),
-            req.amount(),
+            actualAmount,
             "succeeded"
         );
         ctx.set(CHARGE_STATE, charge);
@@ -80,7 +88,6 @@ public class PaymentVOImpl extends PaymentVO {
         return charge;
     }
 
-    @Override
     public Charge refund(ChargeRequest req) {
         ObjectContext ctx = (ObjectContext) Context.current();
 

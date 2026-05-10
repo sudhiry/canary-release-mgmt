@@ -1,5 +1,7 @@
 package com.canary.payment.config;
 
+import com.canary.payment.handler.PaymentVOImplCanary;
+import com.canary.payment.handler.PaymentVOImplStable;
 import com.canary.payment.store.ChargeStore;
 import com.canary.platform.lib.XCanaryRestateClientCustomizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -33,6 +35,30 @@ class RestateEndpointGatingTest {
     @Test
     void whenFlagAbsentThenDefaultsToActive() {
         runner.run(ctx -> assertThat(ctx).hasSingleBean(RestateEndpointConfig.class));
+    }
+
+    @Test
+    void wiresStableImplWhenVersionIsStable() {
+        runner.withPropertyValues("app.version=stable", "app.restate.register-handlers=true")
+            .run(ctx -> {
+                assertThat(ctx).hasSingleBean(PaymentVOImplStable.class);
+                assertThat(ctx).doesNotHaveBean(PaymentVOImplCanary.class);
+            });
+    }
+
+    @Test
+    void wiresCanaryImplWhenVersionIsCanary() {
+        runner.withPropertyValues("app.version=canary", "app.restate.register-handlers=true")
+            .run(ctx -> {
+                assertThat(ctx).hasSingleBean(PaymentVOImplCanary.class);
+                assertThat(ctx).doesNotHaveBean(PaymentVOImplStable.class);
+            });
+    }
+
+    @Test
+    void rejectsUnknownVersion() {
+        runner.withPropertyValues("app.version=banana", "app.restate.register-handlers=true")
+            .run(ctx -> assertThat(ctx).hasFailed());
     }
 
     @Configuration

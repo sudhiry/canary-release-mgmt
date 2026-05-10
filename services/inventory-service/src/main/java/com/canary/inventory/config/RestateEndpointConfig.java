@@ -1,6 +1,7 @@
 package com.canary.inventory.config;
 
-import com.canary.inventory.handler.ReservationWorkflowImpl;
+import com.canary.inventory.handler.ReservationWorkflowImplStable;
+import com.canary.inventory.handler.ReservationWorkflowImplCanary;
 import com.canary.inventory.store.ReservationStore;
 import com.canary.platform.lib.XCanaryRestateClientCustomizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -9,6 +10,7 @@ import dev.restate.sdk.http.vertx.RestateHttpServer;
 import io.vertx.core.http.HttpServer;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -16,10 +18,10 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.core.KafkaTemplate;
 
 /**
- * Starts the Restate HTTP endpoint for the ReservationWorkflow handler.
- * Gated by {@code app.restate.register-handlers} (defaults to {@code true}).
- * Set to {@code false} in tests and canary-only deployments where this node
- * should not register handlers.
+ * Starts the Restate HTTP endpoint. Variant is determined by {@code app.version}:
+ * "stable" wires {@link ReservationWorkflowImplStable}; "canary" wires
+ * {@link ReservationWorkflowImplCanary}. Gated overall by
+ * {@code app.restate.register-handlers} (default true).
  */
 @Configuration
 @ConditionalOnProperty(
@@ -30,23 +32,43 @@ import org.springframework.kafka.core.KafkaTemplate;
 public class RestateEndpointConfig {
 
     private final int port;
-    private final ReservationWorkflowImpl handler;
+    private final Object handler;   // Object so either Stable or Canary impl works
     private HttpServer server;
 
     public RestateEndpointConfig(@Value("${app.restate.handler.port}") int port,
-                                 ReservationWorkflowImpl handler) {
+                                 @Autowired(required = false)
+                                     ReservationWorkflowImplStable stableHandler,
+                                 @Autowired(required = false)
+                                     ReservationWorkflowImplCanary canaryHandler) {
         this.port = port;
-        this.handler = handler;
+        if (stableHandler != null && canaryHandler != null) {
+            throw new IllegalStateException(
+                "Both stable and canary impls present; check app.version configuration");
+        }
+        if (stableHandler != null) this.handler = stableHandler;
+        else if (canaryHandler != null) this.handler = canaryHandler;
+        else throw new IllegalStateException(
+            "No reservation handler bean present; expected app.version=stable|canary");
     }
 
     @Bean
-    public static ReservationWorkflowImpl reservationWorkflowImpl(
+    @ConditionalOnProperty(name = "app.version", havingValue = "stable", matchIfMissing = true)
+    public static ReservationWorkflowImplStable reservationWorkflowImplStable(
             ReservationStore store,
             XCanaryRestateClientCustomizer canary,
             KafkaTemplate<String, String> kafkaTemplate,
-            ObjectMapper objectMapper
-    ) {
-        return new ReservationWorkflowImpl(store, canary, kafkaTemplate, objectMapper);
+            ObjectMapper objectMapper) {
+        return new ReservationWorkflowImplStable(store, canary, kafkaTemplate, objectMapper);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "app.version", havingValue = "canary")
+    public static ReservationWorkflowImplCanary reservationWorkflowImplCanary(
+            ReservationStore store,
+            XCanaryRestateClientCustomizer canary,
+            KafkaTemplate<String, String> kafkaTemplate,
+            ObjectMapper objectMapper) {
+        return new ReservationWorkflowImplCanary(store, canary, kafkaTemplate, objectMapper);
     }
 
     @PostConstruct

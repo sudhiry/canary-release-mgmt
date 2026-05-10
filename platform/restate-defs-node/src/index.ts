@@ -13,6 +13,7 @@ export type AuditQueryServiceMethods = {
   byAggregate(aggregateId: string): Promise<AuditEvent[]>;
 };
 
+// audit is not subset-forked; one definition.
 export const auditQueryServiceDef = {
   name: "AuditQueryService",
 } as restate.ServiceDefinitionFrom<AuditQueryServiceMethods>;
@@ -26,7 +27,7 @@ export interface ChargeRequest {
 export interface Charge {
   id: string;
   orderId: string;
-  amount: number;
+  amount: number;     // canary: (req.amount * 99) / 100; stable: req.amount
   status: string;
 }
 
@@ -35,8 +36,12 @@ export type PaymentVOMethods = {
   refund(req: ChargeRequest): Promise<Charge>;
 };
 
-export const paymentVODef = {
-  name: "PaymentVO",
+export const paymentVOStableDef = {
+  name: "PaymentVOStable",
+} as restate.VirtualObjectDefinitionFrom<PaymentVOMethods>;
+
+export const paymentVOCanaryDef = {
+  name: "PaymentVOCanary",
 } as restate.VirtualObjectDefinitionFrom<PaymentVOMethods>;
 
 // ----- inventory -----
@@ -52,6 +57,7 @@ export interface Reservation {
   quantity: number;
   orderId: string;
   status: string;
+  bufferUnits: number;   // 0 stable, 1 canary
 }
 
 export interface AvailabilityResponse {
@@ -61,12 +67,16 @@ export interface AvailabilityResponse {
 
 export type ReservationWorkflowMethods = {
   run(req: ReservationRequest): Promise<Reservation>;
-  confirm(): Promise<void>;
+  confirm(): Promise<Reservation>;   // was Promise<void>; now returns confirmed Reservation
   release(): Promise<void>;
 };
 
-export const reservationWorkflowDef = {
-  name: "ReservationWorkflow",
+export const reservationWorkflowStableDef = {
+  name: "ReservationWorkflowStable",
+} as restate.WorkflowDefinitionFrom<ReservationWorkflowMethods>;
+
+export const reservationWorkflowCanaryDef = {
+  name: "ReservationWorkflowCanary",
 } as restate.WorkflowDefinitionFrom<ReservationWorkflowMethods>;
 
 // ----- notification -----
@@ -76,19 +86,22 @@ export interface NotifyRequest {
   orderId: string;
 }
 
-export interface Notification {
-  id: string;
-  userId: string;
-  message: string;
-  status: string;
+export interface NotifyResult {
+  delivered: boolean;
+  version: "stable" | "canary";
+  deliveredMessage: string;   // canary appends "[via canary notifier]"
 }
 
 export type NotificationServiceMethods = {
-  notify(req: NotifyRequest): Promise<Notification>;
+  notify(req: NotifyRequest): Promise<NotifyResult>;
 };
 
-export const notificationServiceDef = {
-  name: "NotificationService",
+export const notificationServiceStableDef = {
+  name: "NotificationServiceStable",
+} as restate.ServiceDefinitionFrom<NotificationServiceMethods>;
+
+export const notificationServiceCanaryDef = {
+  name: "NotificationServiceCanary",
 } as restate.ServiceDefinitionFrom<NotificationServiceMethods>;
 
 // ----- order -----
@@ -106,12 +119,17 @@ export interface Order {
   quantity: number;
   amount: number;
   status: string;
+  auditTrail: string[];   // NEW: per-hop "<svc>@<variant>" entries
 }
 
 export type CheckoutSagaMethods = {
   run(req: OrderRequest): Promise<Order>;
 };
 
-export const checkoutSagaDef = {
-  name: "CheckoutSaga",
+export const checkoutSagaStableDef = {
+  name: "CheckoutSagaStable",
+} as restate.WorkflowDefinitionFrom<CheckoutSagaMethods>;
+
+export const checkoutSagaCanaryDef = {
+  name: "CheckoutSagaCanary",
 } as restate.WorkflowDefinitionFrom<CheckoutSagaMethods>;
