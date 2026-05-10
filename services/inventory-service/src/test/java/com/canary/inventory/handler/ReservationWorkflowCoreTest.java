@@ -20,7 +20,8 @@ import dev.restate.sdk.internal.ContextThreadLocal;
 import dev.restate.serde.TypeTag;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.kafka.core.KafkaTemplate;
 
@@ -38,14 +39,13 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-class ReservationWorkflowImplTest {
+class ReservationWorkflowCoreTest {
 
     ReservationStore store;
     XCanaryRestateClientCustomizer canary;
     @SuppressWarnings("unchecked")
     KafkaTemplate<String, String> kafkaTemplate = mock(KafkaTemplate.class);
     ObjectMapper objectMapper = new ObjectMapper();
-    ReservationWorkflowImpl handler;
     WorkflowContext ctx;
     Awakeable<String> awakeable;
     @SuppressWarnings("unchecked")
@@ -56,7 +56,6 @@ class ReservationWorkflowImplTest {
     void setUp() {
         store = new ReservationStore();
         canary = new XCanaryRestateClientCustomizer();
-        handler = new ReservationWorkflowImpl(store, canary, kafkaTemplate, objectMapper);
         ctx = mock(WorkflowContext.class);
         awakeable = mock(Awakeable.class);
         when(ctx.awakeable(any(TypeTag.class))).thenReturn(awakeable);
@@ -72,21 +71,31 @@ class ReservationWorkflowImplTest {
         XCanaryContext.clear();
     }
 
-    @Test
-    void runWritesReservedAndAwaitsAwakeable() {
+    private ReservationWorkflowCore core(boolean isCanary) {
+        return new ReservationWorkflowCore(store, canary, kafkaTemplate, objectMapper, isCanary);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void runWritesReservedAndAwaitsAwakeable(boolean isCanary) {
         when(timedAwakeable.await()).thenReturn("confirm");
-        Reservation result = handler.run(new ReservationRequest("SKU-A", 5, "ord_1"));
+        Reservation result = core(isCanary).run(new ReservationRequest("SKU-A", 5, "ord_1"));
         assertThat(result.sku()).isEqualTo("SKU-A");
         assertThat(result.quantity()).isEqualTo(5);
         assertThat(result.orderId()).isEqualTo("ord_1");
         assertThat(result.status()).isEqualTo("confirmed");
+        assertThat(result.bufferUnits()).isEqualTo(isCanary ? 1 : 0);
     }
 
-    @Test
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     @SuppressWarnings("unchecked")
-    void confirmSignalTransitionsToConfirmedAndEmitsEvent() throws Exception {
+    void confirmSignalTransitionsToConfirmedAndEmitsEvent(boolean isCanary) throws Exception {
         when(timedAwakeable.await()).thenReturn("confirm");
-        handler.run(new ReservationRequest("SKU-A", 5, "ord_1"));
+        Reservation result = core(isCanary).run(new ReservationRequest("SKU-A", 5, "ord_1"));
+        assertThat(result.status()).isEqualTo("confirmed");
+        assertThat(result.bufferUnits()).isEqualTo(isCanary ? 1 : 0);
+
         var keyCap = ArgumentCaptor.forClass(String.class);
         var valueCap = ArgumentCaptor.forClass(String.class);
         verify(kafkaTemplate, times(2))
@@ -96,12 +105,15 @@ class ReservationWorkflowImplTest {
         assertThat(finalEvent.status()).isEqualTo("confirmed");
     }
 
-    @Test
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     @SuppressWarnings("unchecked")
-    void releaseSignalTransitionsToReleased() throws Exception {
+    void releaseSignalTransitionsToReleased(boolean isCanary) throws Exception {
         when(timedAwakeable.await()).thenReturn("release");
-        Reservation result = handler.run(new ReservationRequest("SKU-A", 5, "ord_1"));
+        Reservation result = core(isCanary).run(new ReservationRequest("SKU-A", 5, "ord_1"));
         assertThat(result.status()).isEqualTo("released");
+        assertThat(result.bufferUnits()).isEqualTo(isCanary ? 1 : 0);
+
         var valueCap = ArgumentCaptor.forClass(String.class);
         verify(kafkaTemplate, times(2))
             .send(eq("inventory.events"), anyString(), valueCap.capture());
@@ -110,13 +122,15 @@ class ReservationWorkflowImplTest {
         assertThat(finalEvent.status()).isEqualTo("released");
     }
 
-    @Test
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     @SuppressWarnings("unchecked")
-    void timerExpiryTransitionsToExpired() throws Exception {
-        // withTimeout(Duration).await() throws TerminalException on timer expiry.
+    void timerExpiryTransitionsToExpired(boolean isCanary) throws Exception {
         when(timedAwakeable.await()).thenThrow(new TerminalException("timeout"));
-        Reservation result = handler.run(new ReservationRequest("SKU-A", 5, "ord_1"));
+        Reservation result = core(isCanary).run(new ReservationRequest("SKU-A", 5, "ord_1"));
         assertThat(result.status()).isEqualTo("expired");
+        assertThat(result.bufferUnits()).isEqualTo(isCanary ? 1 : 0);
+
         var valueCap = ArgumentCaptor.forClass(String.class);
         verify(kafkaTemplate, times(2))
             .send(eq("inventory.events"), anyString(), valueCap.capture());
@@ -125,12 +139,13 @@ class ReservationWorkflowImplTest {
         assertThat(finalEvent.status()).isEqualTo("expired");
     }
 
-    @Test
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     @SuppressWarnings("unchecked")
-    void runStampsXCanaryOnAuditCallWhenContextIsCanary() {
+    void runStampsXCanaryOnAuditCallWhenContextIsCanary(boolean isCanary) {
         XCanaryContext.set(true);
         when(timedAwakeable.await()).thenReturn("confirm");
-        handler.run(new ReservationRequest("SKU-A", 5, "ord_1"));
+        core(isCanary).run(new ReservationRequest("SKU-A", 5, "ord_1"));
         var reqCap = ArgumentCaptor.forClass(Request.class);
         verify(ctx, atLeast(1)).call(reqCap.capture());
         Request<?, ?> firstReq = reqCap.getAllValues().get(0);
@@ -138,37 +153,51 @@ class ReservationWorkflowImplTest {
             .containsEntry(XCanaryConstants.HEADER_NAME, XCanaryConstants.TRUE_VALUE);
     }
 
-    @Test
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     @SuppressWarnings("unchecked")
-    void confirmSharedHandlerResolvesAwakeable() {
+    void confirmSharedHandlerResolvesAwakeableAndReturnsReservation(boolean isCanary) {
         SharedWorkflowContext sharedCtx = mock(SharedWorkflowContext.class);
         AwakeableHandle handle = mock(AwakeableHandle.class);
         ContextThreadLocal.setContext(sharedCtx);
-        when(sharedCtx.get(any(StateKey.class))).thenReturn(Optional.of("awk-1"));
+        when(sharedCtx.get(any(StateKey.class))).thenAnswer(inv -> {
+            StateKey<?> key = inv.getArgument(0);
+            if ("awakeableId".equals(key.name())) return Optional.of("awk-1");
+            if ("currentReservation".equals(key.name())) {
+                return Optional.of(new Reservation("res-1", "SKU-A", 5, "ord_1", "reserved", 0));
+            }
+            return Optional.empty();
+        });
         when(sharedCtx.awakeableHandle("awk-1")).thenReturn(handle);
-        handler.confirm();
+
+        Reservation result = core(isCanary).confirm();
+
         verify(handle).resolve(any(TypeTag.class), eq("confirm"));
+        assertThat(result.status()).isEqualTo("confirmed");
+        assertThat(result.bufferUnits()).isEqualTo(isCanary ? 1 : 0);
     }
 
-    @Test
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     @SuppressWarnings("unchecked")
-    void releaseSharedHandlerResolvesAwakeable() {
+    void releaseSharedHandlerResolvesAwakeable(boolean isCanary) {
         SharedWorkflowContext sharedCtx = mock(SharedWorkflowContext.class);
         AwakeableHandle handle = mock(AwakeableHandle.class);
         ContextThreadLocal.setContext(sharedCtx);
         when(sharedCtx.get(any(StateKey.class))).thenReturn(Optional.of("awk-1"));
         when(sharedCtx.awakeableHandle("awk-1")).thenReturn(handle);
-        handler.release();
+        core(isCanary).release();
         verify(handle).resolve(any(TypeTag.class), eq("release"));
     }
 
-    @Test
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
     @SuppressWarnings("unchecked")
-    void confirmAfterTerminationThrowsTerminalException() {
+    void confirmAfterTerminationThrowsTerminalException(boolean isCanary) {
         SharedWorkflowContext sharedCtx = mock(SharedWorkflowContext.class);
         ContextThreadLocal.setContext(sharedCtx);
         when(sharedCtx.get(any(StateKey.class))).thenReturn(Optional.empty());
-        assertThatThrownBy(() -> handler.confirm())
+        assertThatThrownBy(() -> core(isCanary).confirm())
             .isInstanceOf(TerminalException.class)
             .hasMessageContaining("not in confirmable state");
     }

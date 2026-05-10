@@ -8,6 +8,7 @@ spring:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
 
 app:
+  version: ${VERSION:stable}
   kafka:
     consumers:
       enabled: ${KAFKA_CONSUMERS_ENABLED:true}
