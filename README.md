@@ -335,10 +335,36 @@ Subset-aware verification uses `kubectl port-forward pod/<name>` to each subset'
 
 ### Cold-cluster boot deadlock + `make pre-warm`
 
-Canary pods' readiness probe is gated on Kafka consumer health (`kafkaConsumer` indicator in Java, `/health` 503 in Node). Health flips to UP only after `recordPoll` fires — and `recordPoll` only fires when a real Kafka message is delivered. On a fully cold cluster with zero traffic, a freshly-deployed canary pod's readiness probe fails forever → never enters service endpoints → stable's pod-watch never observes `canaryReady=true` → flagged events fall through to stable as if no canary existed.
+Canary pods' readiness probe is gated on Kafka consumer health (`kafkaConsumer` indicator in Java, `/health` 503 in Node). Health flips to UP only after `recordPoll` fires — and `recordPoll` only fires when a real Kafka message is delivered. Stable pods are NOT gated on Kafka health; gating both subsets caused a fresh-deploy chicken-and-egg problem. See "Post-merge fixes" below.
 
 Before the first `make canary-deploy` on a fresh cluster, run `make pre-warm` to send 3 baseline (non-canary) orders. This flows messages across `orders.events`, `payments.events`, `inventory.events`, and `notifications.events`, satisfying every consumer's `recordPoll` ahead of any canary deploy. `make deploy-services` prints a reminder at the end. Tunable via `PRE_WARM_COUNT`, `PRE_WARM_DELAY_MS`, `PRE_WARM_URL`.
 
-`KAFKA_HEALTH_TIMEOUT_MS` (default 30000) is now overridable per-pod for both Node services — symmetric with Java's `canary.kafka-health-timeout-ms`. Lower it to make readiness more sensitive to a stuck consumer; raise it for noisier production environments.
+`KAFKA_HEALTH_TIMEOUT_MS` (default 30000) is overridable per-pod for both Node services — symmetric with Java's `canary.kafka-health-timeout-ms`. Lower it to make readiness more sensitive to a stuck consumer; raise it for noisier production environments.
 
-Phase 2 (Kafka canary) is now feature-complete. Schema evolution (Phase 2.c) is deferred.
+### Post-merge fixes (cluster verification surfaced 5 issues)
+
+After Phase 2.b merged, a cluster verification pass uncovered several bugs that the unit-test suite didn't catch. All five are now fixed and merged:
+
+- **Item 1 — Cold-cluster pre-warm.** Canary deploys deadlocked on a freshly-deployed cluster with no traffic. `make pre-warm` + README workaround. ([commit 295c3f6](https://github.com/anthropics/canary-release-mgmt/commit/295c3f6))
+- **Item 2 — Java listener ordering test.** Each listener test asserted `recordPoll` and filter-rejection separately; nothing covered the *order*. Extended `filterRejectionShortCircuits` to assert `pollFlag` after rejection. ([commit 4e7662e](https://github.com/anthropics/canary-release-mgmt/commit/4e7662e))
+- **Item 3 — `KAFKA_HEALTH_TIMEOUT_MS` env-driven.** Node services hardcoded the timeout; now plumbed through `config.ts` to match Java's `canary.kafka-health-timeout-ms`. ([commit f07bf0d](https://github.com/anthropics/canary-release-mgmt/commit/f07bf0d))
+- **Item 4 — Stable readiness no longer Kafka-gated.** Phase 2.b lumped `kafkaConsumer` into the base `application.yml` readiness group, so STABLE pods couldn't become Ready on a cold cluster either (no producer running yet → no poll → readiness 503 forever → `helm install --wait` timed out). Fix: stable uses `readinessState` only; canary's overlay adds `MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: "readinessState,kafkaConsumer"` for the canary-only K5 takeover behavior. Same split in Node `/health`. ([merge ac49e98](https://github.com/anthropics/canary-release-mgmt/commit/ac49e98))
+- **Item 5 — Java services were silently NOT subscribing to Kafka.** Spring Boot 4.0.4's `KafkaAutoConfiguration` no longer auto-imports `@EnableKafka` AND no longer auto-creates `ConsumerFactory` / `kafkaListenerContainerFactory` beans (regression from 3.x). Without them, `@KafkaListener` is silently a no-op — bean is registered, container never starts, no consumer group ever joined. Existing tests use `ApplicationContextRunner` and call `onMessage(record)` directly, so they never started a real listener container and the gap was invisible. Surfaced when `kafka-consumer-groups.sh --list` showed only the 3 Node service groups, zero Java. Fix: `@EnableKafka` on each Java `*Application` class + `ConsumerFactory<Object, Object>` + `ConcurrentKafkaListenerContainerFactory` beans defined in `XCanaryAutoConfiguration` (with `auto-offset-reset=earliest` so brand-new canary groups pick up pre-warm messages). ([commits a40a7df](https://github.com/anthropics/canary-release-mgmt/commit/a40a7df) + [1e66a6d](https://github.com/anthropics/canary-release-mgmt/commit/1e66a6d))
+
+After Items 4 + 5, `make deploy-services` succeeds on a cold cluster, all 6 expected consumer groups appear in `kafka-consumer-groups.sh --list`, and pre-warm orders show lag=0 on every Java + Node consumer.
+
+### Open finding (deferred): K1 e2e saga timeout
+
+With Items 1–5 in place, K1's `beforeAll` (5 sequential canary deploys) succeeds — but the test phase (`sendOrder({canary: true})` POST → saga calls inventory + payment + notification with `x-canary: true` header) hangs past vitest's 300s `testTimeout`. Pre-warm orders during the same window show ~50% timeout rate, suggesting the canary saga path is genuinely flaky under load (not an infrastructure issue — those are now fixed). Likely culprits to investigate before re-enabling K1–K5 cluster verification:
+
+- Istio header-based subset routing loop (canary → downstream → back to canary)
+- Restate handler registration race with canary in the mesh
+- Saga HTTP client lacking per-call timeout (axios defaults to no timeout)
+
+This is tracked as a Phase 2 follow-up, not Phase 2.c.
+
+### Phase 2.c — Schema evolution (deferred)
+
+Phase 2.c is intentionally deferred. The contract gap it would close: today every event is plain JSON via `objectMapper.writeValueAsString(charge)` (Java) / `JSON.stringify` (Node), with no `schemaVersion` field, no schema registry, and no compatibility policy. This works while every service runs the same event class but breaks the moment a canary changes an event's shape. The cheapest first slice (described in the Phase 2.b post-merge notes) is: add `schemaVersion: number` to every payload, gate consumers on it via a new `XCanarySchemaFilter`, add a K6-style scenario where canary publishes `schemaVersion=2` and stable rejects gracefully. A registry choice (Confluent, Apicurio, Karapace) and wire format (JSON/Avro/Protobuf) is a separate brainstorming session.
+
+Phase 2 (Kafka canary) is feature-complete on the routing + readiness axes. Schema evolution (Phase 2.c) is deferred. Restate canary handler versioning → Phase 3. Argo Rollouts / percent-split → Phase 4.
