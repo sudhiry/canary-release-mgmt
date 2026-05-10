@@ -2,25 +2,43 @@ import { describe, expect, it } from "vitest";
 import { createKafkaHealthState } from "../kafka-consumer-health.js";
 
 describe("kafka-consumer-health", () => {
-  it("initially not healthy (no poll yet)", () => {
-    const s = createKafkaHealthState(30_000);
+  it("not assigned → unhealthy", () => {
+    const s = createKafkaHealthState(15_000);
     expect(s.isHealthy()).toBe(false);
     expect(s.report().ok).toBe(false);
-    expect(s.report().reason).toMatch(/no poll/i);
+    expect(s.report().reason).toMatch(/no partitions assigned/i);
   });
 
-  it("healthy after recordPoll", () => {
-    const s = createKafkaHealthState(30_000);
-    s.recordPoll();
+  it("assigned but no heartbeat → unhealthy", () => {
+    const s = createKafkaHealthState(15_000);
+    s.markAssigned();
+    expect(s.isHealthy()).toBe(false);
+    expect(s.report().reason).toMatch(/no heartbeat/i);
+  });
+
+  it("assigned + fresh heartbeat → healthy", () => {
+    const s = createKafkaHealthState(15_000);
+    s.markAssigned();
+    s.recordHeartbeat();
     expect(s.isHealthy()).toBe(true);
     expect(s.report().ok).toBe(true);
   });
 
-  it("not healthy when stale beyond timeout", async () => {
+  it("assigned + stale heartbeat → unhealthy", async () => {
     const s = createKafkaHealthState(50);
-    s.recordPoll();
+    s.markAssigned();
+    s.recordHeartbeat();
     await new Promise((r) => setTimeout(r, 100));
     expect(s.isHealthy()).toBe(false);
     expect(s.report().reason).toMatch(/stale/i);
+  });
+
+  it("revoked after assigned → unhealthy", () => {
+    const s = createKafkaHealthState(15_000);
+    s.markAssigned();
+    s.recordHeartbeat();
+    expect(s.isHealthy()).toBe(true);
+    s.markRevoked();
+    expect(s.isHealthy()).toBe(false);
   });
 });

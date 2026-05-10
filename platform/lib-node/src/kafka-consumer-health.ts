@@ -5,27 +5,36 @@ export interface KafkaHealthReport {
 }
 
 export interface KafkaHealthState {
-  recordPoll(): void;
+  markAssigned(): void;
+  markRevoked(): void;
+  recordHeartbeat(): void;
   isHealthy(): boolean;
   report(): KafkaHealthReport;
 }
 
-export function createKafkaHealthState(timeoutMs: number = 30_000): KafkaHealthState {
-  let lastPollMs = 0;
+export function createKafkaHealthState(heartbeatStaleMs: number = 15_000): KafkaHealthState {
+  let assigned = false;
+  let lastHeartbeatMs = 0;
   return {
-    recordPoll() {
-      lastPollMs = Date.now();
+    markAssigned() {
+      assigned = true;
+    },
+    markRevoked() {
+      assigned = false;
+    },
+    recordHeartbeat() {
+      lastHeartbeatMs = Date.now();
     },
     isHealthy() {
-      if (lastPollMs === 0) return false;
-      return Date.now() - lastPollMs <= timeoutMs;
+      if (!assigned) return false;
+      if (lastHeartbeatMs === 0) return false;
+      return Date.now() - lastHeartbeatMs <= heartbeatStaleMs;
     },
     report() {
-      if (lastPollMs === 0) {
-        return { ok: false, reason: "no poll yet" };
-      }
-      const ageMs = Date.now() - lastPollMs;
-      if (ageMs > timeoutMs) {
+      if (!assigned) return { ok: false, reason: "no partitions assigned" };
+      if (lastHeartbeatMs === 0) return { ok: false, reason: "no heartbeat yet" };
+      const ageMs = Date.now() - lastHeartbeatMs;
+      if (ageMs > heartbeatStaleMs) {
         return { ok: false, reason: `stale ${Math.floor(ageMs / 1000)}s`, ageMs };
       }
       return { ok: true, ageMs };
