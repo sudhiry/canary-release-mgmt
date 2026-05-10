@@ -1,15 +1,18 @@
+import axios from "axios";
+import {
+  attachXCanaryAxiosInterceptor,
+  attachXServedChainAxiosInterceptor,
+} from "@canary/lib-node";
 import { loadConfig } from "./config.js";
-import { setupHttp, buildClient } from "./http.js";
+import { setupHttp } from "./http.js";
 import { setupKafka } from "./kafka.js";
 import { setupRestate } from "./restate.js";
 
 const config = loadConfig();
 
-const clients = {
-  inventory: buildClient(config.INVENTORY_URL),
-  payment: buildClient(config.PAYMENT_URL),
-  notification: buildClient(config.NOTIFICATION_URL),
-};
+const ingressClient = axios.create({ baseURL: config.RESTATE_INGRESS_URL });
+attachXCanaryAxiosInterceptor(ingressClient);
+attachXServedChainAxiosInterceptor(ingressClient);
 
 const kafka = await setupKafka({
   brokers: config.KAFKA_BOOTSTRAP_SERVERS,
@@ -19,7 +22,7 @@ const kafka = await setupKafka({
 });
 
 const app = setupHttp({
-  clients,
+  ingressClient,
   kafkaSend: kafka.send,
   kafkaHealth: kafka.health,
   version: process.env.VERSION ?? "stable",
