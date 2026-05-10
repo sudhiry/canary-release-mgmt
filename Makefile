@@ -1,4 +1,4 @@
-.PHONY: help up down status smoke-infra dashboards dashboards-stop dashboards-status verify build-services build-images load-images images deploy-services undeploy-services smoke-services clean e2e ci-local
+.PHONY: help up down status smoke-infra dashboards dashboards-stop dashboards-status verify build-services build-images load-images images deploy-services pre-warm undeploy-services smoke-services clean e2e ci-local
 
 # Versions (pinned for reproducibility)
 KIND_CLUSTER_NAME := canary-release-mgmt
@@ -55,6 +55,9 @@ images: build-images load-images ## Build then load all 5 images
 
 deploy-services: ## Apply KafkaTopics + Helm install all 5 + Istio routing
 	@bash deploy/services/deploy.sh
+
+pre-warm: ## Pre-warm Kafka topics with baseline orders (run BEFORE first canary on a cold cluster)
+	@bash deploy/services/pre-warm.sh
 
 undeploy-services: ## Remove routing, Helm releases, and KafkaTopics
 	@bash deploy/services/undeploy.sh

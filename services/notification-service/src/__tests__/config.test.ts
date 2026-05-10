@@ -11,6 +11,12 @@ describe("loadConfig", () => {
     expect(cfg.RESTATE_REGISTER_HANDLERS).toBe(true);
     expect(cfg.RESTATE_INGRESS_URL).toBe("http://localhost:9070");
     expect(cfg.RESTATE_HANDLER_PORT).toBe(9085);
+    expect(cfg.KAFKA_HEALTH_TIMEOUT_MS).toBe(30000);
+  });
+
+  it("respects KAFKA_HEALTH_TIMEOUT_MS override", () => {
+    const cfg = loadConfig({ KAFKA_HEALTH_TIMEOUT_MS: "5000" });
+    expect(cfg.KAFKA_HEALTH_TIMEOUT_MS).toBe(5000);
   });
 
   it("treats KAFKA_CONSUMERS_ENABLED=false as false", () => {

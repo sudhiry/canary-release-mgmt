@@ -333,4 +333,12 @@ Phase 2 acceptance scenarios K1–K5 (under `tests/e2e/`) prove the four canary 
 
 Subset-aware verification uses `kubectl port-forward pod/<name>` to each subset's pod (via `tests/e2e/helpers/pod-port-forward.ts`) and queries `/internal/consumed-events` directly — the edge gateway only routes `/api/orders`, and Istio subset-by-header is in-mesh-only, so the test runner has to address pods individually.
 
+### Cold-cluster boot deadlock + `make pre-warm`
+
+Canary pods' readiness probe is gated on Kafka consumer health (`kafkaConsumer` indicator in Java, `/health` 503 in Node). Health flips to UP only after `recordPoll` fires — and `recordPoll` only fires when a real Kafka message is delivered. On a fully cold cluster with zero traffic, a freshly-deployed canary pod's readiness probe fails forever → never enters service endpoints → stable's pod-watch never observes `canaryReady=true` → flagged events fall through to stable as if no canary existed.
+
+Before the first `make canary-deploy` on a fresh cluster, run `make pre-warm` to send 3 baseline (non-canary) orders. This flows messages across `orders.events`, `payments.events`, `inventory.events`, and `notifications.events`, satisfying every consumer's `recordPoll` ahead of any canary deploy. `make deploy-services` prints a reminder at the end. Tunable via `PRE_WARM_COUNT`, `PRE_WARM_DELAY_MS`, `PRE_WARM_URL`.
+
+`KAFKA_HEALTH_TIMEOUT_MS` (default 30000) is now overridable per-pod for both Node services — symmetric with Java's `canary.kafka-health-timeout-ms`. Lower it to make readiness more sensitive to a stuck consumer; raise it for noisier production environments.
+
 Phase 2 (Kafka canary) is now feature-complete. Schema evolution (Phase 2.c) is deferred.
