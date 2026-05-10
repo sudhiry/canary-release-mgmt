@@ -133,6 +133,69 @@ Drift entries you might see:
 
 `status` exits 2 when drift is non-empty; CI uses this.
 
+### Sequence: canary-ctl deploy
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Dev as Developer
+    participant CLI as canary-ctl
+    participant State as state file<br/>~/.canary-ctl/<svc>.json
+    participant Helm
+    participant K8s as K8s API
+    participant VS as Istio VirtualService
+
+    Dev->>CLI: make canary-deploy SVC=<s> TAG=<t>
+    CLI->>State: write phase=deploying, tag, deployedAt
+    CLI->>Helm: helm upgrade --install <svc>-canary<br/>-f canary-overlay.yaml --wait
+    Helm->>K8s: apply Deployment + Service<br/>+ ServiceAccount + Role + RoleBinding
+    K8s-->>Helm: rollout result
+
+    alt rollout fails
+        CLI->>Helm: helm uninstall <svc>-canary
+        CLI->>VS: ensure rule list = [default]
+        CLI->>State: delete file
+        CLI-->>Dev: error (re-thrown)
+    else rollout succeeds
+        CLI->>State: write phase=deployment-ready
+        CLI->>VS: patch — insert canary-by-header above default
+        CLI->>State: write phase=active
+        CLI-->>Dev: ok
+    end
+```
+
+### Sequence: canary-ctl rollback
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Dev as Developer
+    participant CLI as canary-ctl
+    participant State as state file
+    participant VS as Istio VirtualService
+    participant Helm
+    participant K8s as K8s API
+
+    Dev->>CLI: make canary-rollback SVC=<s>
+    CLI->>State: read; write phase=rolling-back
+    CLI->>VS: patch — rules = [default]<br/>(remove canary-by-header)
+    note over CLI: no new flagged traffic<br/>reaches canary
+    CLI->>CLI: sleep --grace-seconds (default 10s)<br/>in-flight requests drain
+    CLI->>Helm: helm uninstall <svc>-canary
+    Helm->>K8s: remove Deployment + Service + ...
+    CLI->>State: delete file
+    CLI-->>Dev: ok
+```
+
+Both flows are idempotent. Running `rollback` against a clean cluster
+is a no-op; `reconcile` covers any drift between the state file and
+cluster reality (see [canary-mechanics.md](canary-mechanics.md#status-svc-and-reconcile-svc)
+for the reconcile policy).
+
+> **Want to watch a canary deploy through the dashboards?** The
+> [onboarding doc has a worked-example walkthrough](onboarding.md#5-manual-dashboard-walkthrough)
+> across Kiali, Jaeger, Grafana, Prometheus, and the Restate admin API.
+
 ## End-to-end test runs
 
 ```bash
