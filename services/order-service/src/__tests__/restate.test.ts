@@ -2,9 +2,9 @@ import { describe, it, expect, vi } from "vitest";
 import * as restate from "@restatedev/restate-sdk";
 import { setupRestate, checkoutSaga, checkoutSagaRunHandler } from "../restate.js";
 import {
-  paymentVODef,
-  reservationWorkflowDef,
-  notificationServiceDef,
+  paymentVOStableDef,
+  reservationWorkflowStableDef,
+  notificationServiceStableDef,
 } from "@canary/restate-defs-node";
 
 vi.mock("@restatedev/restate-sdk", async () => {
@@ -62,7 +62,7 @@ function buildCtx(opts: {
   };
   const notificationClient = {
     notify: vi.fn(opts.notify ?? (async () =>
-      ({ id: "n_1", userId: "u_1", message: "ok", status: "sent" }))),
+      ({ delivered: true, version: "stable" as const, deliveredMessage: "ok" }))),
   };
   const headers = new Map<string, string>();
   if (opts.canary) headers.set("x-canary", "true");
@@ -72,19 +72,19 @@ function buildCtx(opts: {
     key,
     request: () => ({ headers }),
     workflowClient: vi.fn((def: unknown, _key: string) => {
-      if (def === reservationWorkflowDef) return reservationClient;
+      if (def === reservationWorkflowStableDef) return reservationClient;
       throw new Error("unexpected workflowClient def");
     }),
     workflowSendClient: vi.fn((def: unknown, _key: string) => {
-      if (def === reservationWorkflowDef) return reservationSendClient;
+      if (def === reservationWorkflowStableDef) return reservationSendClient;
       throw new Error("unexpected workflowSendClient def");
     }),
     objectClient: vi.fn((def: unknown, _key: string) => {
-      if (def === paymentVODef) return paymentClient;
+      if (def === paymentVOStableDef) return paymentClient;
       throw new Error("unexpected objectClient def");
     }),
     serviceClient: vi.fn((def: unknown) => {
-      if (def === notificationServiceDef) return notificationClient;
+      if (def === notificationServiceStableDef) return notificationClient;
       throw new Error("unexpected serviceClient def");
     }),
     _mocks: {

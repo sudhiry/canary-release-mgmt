@@ -22,7 +22,7 @@ describe("HTTP routes", () => {
 
   it("POST /api/orders posts to Restate Ingress and returns the completed order", async () => {
     const ingressClient = makeIngressClient(async (url) => {
-      // url shape: /CheckoutSaga/<orderId>/run
+      // url shape: /CheckoutSagaStable/<orderId>/run (no x-canary header → Stable)
       const orderId = url.split("/")[2];
       return {
         data: {
@@ -32,6 +32,7 @@ describe("HTTP routes", () => {
           quantity: 1,
           amount: 100,
           status: "completed",
+          auditTrail: ["saga@stable"],
         },
       };
     });
@@ -48,7 +49,7 @@ describe("HTTP routes", () => {
 
     expect(ingressClient.post).toHaveBeenCalledOnce();
     const [url, body] = (ingressClient.post as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(url).toMatch(/^\/CheckoutSaga\/[0-9a-f-]+\/run$/);
+    expect(url).toMatch(/^\/CheckoutSagaStable\/[0-9a-f-]+\/run$/);
     expect(body).toEqual({ userId: "u_1", sku: "widget", quantity: 1, amount: 100 });
   });
 
@@ -63,6 +64,7 @@ describe("HTTP routes", () => {
           quantity: 1,
           amount: 100,
           status: "failed",
+          auditTrail: [],
         },
       };
     });
@@ -103,6 +105,7 @@ describe("HTTP routes", () => {
           quantity: 1,
           amount: 100,
           status: "completed",
+          auditTrail: ["saga@stable"],
         },
       };
     });
@@ -122,7 +125,7 @@ describe("HTTP routes", () => {
   });
 
   it("GET /api/orders/:id returns 200 when found", async () => {
-    orderStore.put({ id: "ord_1", userId: "u_1", sku: "widget", quantity: 1, amount: 100, status: "completed" });
+    orderStore.put({ id: "ord_1", userId: "u_1", sku: "widget", quantity: 1, amount: 100, status: "completed", auditTrail: [] });
 
     const app = setupHttp({ ingressClient: makeIngressClient() });
 
@@ -138,6 +141,86 @@ describe("HTTP routes", () => {
     const res = await request(app).get("/api/orders/nope");
 
     expect(res.status).toBe(404);
+  });
+
+  it("posts to /CheckoutSagaCanary when x-canary: true", async () => {
+    const ingressClient = makeIngressClient(async (url) => {
+      const orderId = url.split("/")[2];
+      return {
+        data: {
+          id: orderId,
+          userId: "u_1",
+          sku: "widget",
+          quantity: 1,
+          amount: 100,
+          status: "completed",
+          auditTrail: ["saga@canary"],
+        },
+      };
+    });
+    const app = setupHttp({ ingressClient });
+
+    await request(app)
+      .post("/api/orders")
+      .set("x-canary", "true")
+      .send({ userId: "u_1", sku: "widget", quantity: 1, amount: 100 });
+
+    expect(ingressClient.post).toHaveBeenCalledOnce();
+    const [url] = (ingressClient.post as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(url).toMatch(/^\/CheckoutSagaCanary\//);
+  });
+
+  it("posts to /CheckoutSagaStable when x-canary absent", async () => {
+    const ingressClient = makeIngressClient(async (url) => {
+      const orderId = url.split("/")[2];
+      return {
+        data: {
+          id: orderId,
+          userId: "u_1",
+          sku: "widget",
+          quantity: 1,
+          amount: 100,
+          status: "completed",
+          auditTrail: ["saga@stable"],
+        },
+      };
+    });
+    const app = setupHttp({ ingressClient });
+
+    await request(app)
+      .post("/api/orders")
+      .send({ userId: "u_1", sku: "widget", quantity: 1, amount: 100 });
+
+    expect(ingressClient.post).toHaveBeenCalledOnce();
+    const [url] = (ingressClient.post as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(url).toMatch(/^\/CheckoutSagaStable\//);
+  });
+
+  it("posts to /CheckoutSagaStable when x-canary is 'false'", async () => {
+    const ingressClient = makeIngressClient(async (url) => {
+      const orderId = url.split("/")[2];
+      return {
+        data: {
+          id: orderId,
+          userId: "u_1",
+          sku: "widget",
+          quantity: 1,
+          amount: 100,
+          status: "completed",
+          auditTrail: ["saga@stable"],
+        },
+      };
+    });
+    const app = setupHttp({ ingressClient });
+
+    await request(app)
+      .post("/api/orders")
+      .set("x-canary", "false")
+      .send({ userId: "u_1", sku: "widget", quantity: 1, amount: 100 });
+
+    expect(ingressClient.post).toHaveBeenCalledOnce();
+    const [url] = (ingressClient.post as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(url).toMatch(/^\/CheckoutSagaStable\//);
   });
 
   it("GET /health returns 200 with {ok: true}", async () => {

@@ -47,8 +47,9 @@ export function setupHttp(deps: HttpDeps): Express {
     const orderId = randomUUID();
 
     try {
+      const variant = req.headers["x-canary"] === "true" ? "Canary" : "Stable";
       const result = await deps.ingressClient.post<Order>(
-        `/CheckoutSaga/${orderId}/run`,
+        `/CheckoutSaga${variant}/${orderId}/run`,
         body,
       );
       const order = result.data;
@@ -70,6 +71,7 @@ export function setupHttp(deps: HttpDeps): Express {
         quantity: body.quantity,
         amount: body.amount,
         status: "failed",
+        auditTrail: [],
       };
       orderStore.put(failed);
       res.status(502).json({ error: "ingress_failed", order: failed });

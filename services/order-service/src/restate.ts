@@ -1,10 +1,14 @@
 import * as restate from "@restatedev/restate-sdk";
 import { runWithCanary, applyXCanaryToRestateOptions } from "@canary/lib-node";
 import {
-  checkoutSagaDef,
-  paymentVODef,
-  reservationWorkflowDef,
-  notificationServiceDef,
+  checkoutSagaStableDef,
+  checkoutSagaCanaryDef,
+  paymentVOStableDef,
+  paymentVOCanaryDef,
+  reservationWorkflowStableDef,
+  reservationWorkflowCanaryDef,
+  notificationServiceStableDef,
+  notificationServiceCanaryDef,
   type Order,
   type OrderRequest,
 } from "@canary/restate-defs-node";
@@ -14,37 +18,33 @@ export interface RestateSetupOptions {
   port: number;
 }
 
-/**
- * Real CheckoutSaga (Phase 3.a Task 7).
- *
- * Orchestrates the order checkout via Restate R-to-R calls with full
- * compensation. The workflow key (== orderId) is set by the caller via
- * the Restate Ingress URL `/CheckoutSaga/<orderId>/run`.
- *
- * Steps + compensation contract:
- *   1. Reserve  (ReservationWorkflow.run via workflowSendClient — fire-and-forget,
- *      since run() parks on awakeable+timer until confirm/release/expire).
- *   2. Charge   (PaymentVO.charge). On TerminalError → release reservation, return failed.
- *   3. Confirm  (ReservationWorkflow.confirm). On TerminalError (timer-raced)
- *      → refund payment, return failed. (No release; reservation already terminal.)
- *   4. Notify   (NotificationService.notify). On TerminalError → refund payment ONLY,
- *      reservation stays confirmed (partial reversal). Return failed.
- *
- * x-canary propagation: every R-to-R call passes an opts wrapper produced by
- * applyXCanaryToRestateOptions, which copies the canary flag from the AsyncLocal
- * context (set by runWithCanary) onto the per-call headers.
- */
+export const MY_VARIANT: "stable" | "canary" =
+  process.env.VERSION === "canary" ? "canary" : "stable";
+
+// Pick the matching set of defs at module load. Saga is locked to its own
+// variant for all downstream calls — never re-evaluates per-request.
+const checkoutSagaDef =
+  MY_VARIANT === "canary" ? checkoutSagaCanaryDef : checkoutSagaStableDef;
+const paymentVODef =
+  MY_VARIANT === "canary" ? paymentVOCanaryDef : paymentVOStableDef;
+const reservationWorkflowDef =
+  MY_VARIANT === "canary" ? reservationWorkflowCanaryDef : reservationWorkflowStableDef;
+const notificationServiceDef =
+  MY_VARIANT === "canary" ? notificationServiceCanaryDef : notificationServiceStableDef;
+
 export async function checkoutSagaRunHandler(
   ctx: restate.WorkflowContext,
   req: OrderRequest,
 ): Promise<Order> {
-  // ctx.request().headers is a ReadonlyMap<string, string> in SDK 1.14.
   const isCanary = ctx.request().headers.get("x-canary") === "true";
-  // The workflow key is the orderId (set by the Ingress URL). WorkflowContext
-  // extends ObjectContext which exposes `key: string`.
   const orderId = ctx.key;
 
   return runWithCanary(isCanary, async () => {
+    const auditTrail: string[] = [
+      `saga@${MY_VARIANT}`,
+      `reservation@${MY_VARIANT}`,   // by-construction trust
+    ];
+
     const order: Order = {
       id: orderId,
       userId: req.userId,
@@ -52,6 +52,7 @@ export async function checkoutSagaRunHandler(
       quantity: req.quantity,
       amount: req.amount,
       status: "pending",
+      auditTrail,
     };
 
     const reservationSendClient = ctx.workflowSendClient(reservationWorkflowDef, orderId);
@@ -59,15 +60,8 @@ export async function checkoutSagaRunHandler(
     const paymentClient = ctx.objectClient(paymentVODef, orderId);
     const notificationClient = ctx.serviceClient(notificationServiceDef);
 
-    // Step 1: reserve. ReservationWorkflow.run parks on awakeable+timer until
-    // confirm/release/expire — we MUST NOT await it (would deadlock since
-    // confirm/release are sent from this same saga). workflowSendClient is the
-    // SDK's fire-and-forget submission API; it returns an InvocationHandle
-    // synchronously after Restate accepts the submission.
+    // Step 1: reserve (fire-and-forget; parks on awakeable+timer)
     try {
-      // SendClient call signatures: `(arg, opts?) => InvocationHandle`. The Restate
-      // SDK's mapped `SendClient<M>` type (rpc.d.ts) collapses (arg, opts?) signatures
-      // for handlers that take an arg. Cast to bypass the gap; runtime accepts opts.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (reservationSendClient as any).run(
         { sku: req.sku, quantity: req.quantity, orderId },
@@ -80,17 +74,19 @@ export async function checkoutSagaRunHandler(
       throw e;
     }
 
-    // Step 2: charge.
+    // Step 2: charge — observe canary tweak via charge.amount math
+    let chargedAmount: number;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (paymentClient as any).charge(
+      const charge = await (paymentClient as any).charge(
         { orderId, amount: req.amount },
         restate.rpc.opts(applyXCanaryToRestateOptions({})),
       );
+      chargedAmount = charge.amount;
+      const paymentVariant = chargedAmount === req.amount ? "stable" : "canary";
+      auditTrail.push(`payment@${paymentVariant}`);
     } catch (e) {
       if (e instanceof restate.TerminalError) {
-        // Compensation: release reservation. The workflow's parked run() will
-        // see the release signal and transition to `released`.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (reservationClient as any).release(
           restate.rpc.opts(applyXCanaryToRestateOptions({})),
@@ -100,16 +96,16 @@ export async function checkoutSagaRunHandler(
       throw e;
     }
 
-    // Step 3: confirm reservation. Resolves the parked awakeable with "confirm".
+    // Step 3: confirm — now returns Reservation; bufferUnits attests the variant
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (reservationClient as any).confirm(
+      const confirmed = await (reservationClient as any).confirm(
         restate.rpc.opts(applyXCanaryToRestateOptions({})),
       );
+      // confirmed.bufferUnits should match MY_VARIANT (sanity, not enforced here)
+      void confirmed;
     } catch (e) {
       if (e instanceof restate.TerminalError) {
-        // Confirm raced with the 120s timer expiry — reservation is already
-        // `expired`; we cannot confirm. Refund the payment and bail.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (paymentClient as any).refund(
           { orderId, amount: req.amount },
@@ -120,17 +116,16 @@ export async function checkoutSagaRunHandler(
       throw e;
     }
 
-    // Step 4: notify.
+    // Step 4: notify — NotifyResult.version attests the variant
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (notificationClient as any).notify(
+      const notifyResp = await (notificationClient as any).notify(
         { userId: req.userId, message: `Order ${orderId} confirmed`, orderId },
         restate.rpc.opts(applyXCanaryToRestateOptions({})),
       );
+      auditTrail.push(`notification@${notifyResp.version}`);
     } catch (e) {
       if (e instanceof restate.TerminalError) {
-        // Compensation: refund only. Reservation stays `confirmed` — the
-        // partial-reversal contract from the spec. No release call.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (paymentClient as any).refund(
           { orderId, amount: req.amount },
@@ -155,6 +150,7 @@ export async function setupRestate(opts: RestateSetupOptions): Promise<void> {
     console.log("RESTATE_REGISTER_HANDLERS=false; skipping Restate endpoint listener");
     return;
   }
+  console.log(`order-service Restate variant=${MY_VARIANT} binding ${checkoutSagaDef.name}`);
   await restate.endpoint().bind(checkoutSaga).listen(opts.port);
   console.log(`order-service Restate handlers listening on ${opts.port}`);
 }
