@@ -9,16 +9,64 @@ const consumerConnectMock = vi.fn().mockResolvedValue(undefined);
 // Track which groupId was passed to kafka.consumer() so tests can assert on it.
 const consumerCreatedWithMock = vi.fn();
 
+// Static event-name table mirroring kafkajs ConsumerEvents.
+const consumerEvents = {
+  HEARTBEAT: "consumer.heartbeat",
+  COMMIT_OFFSETS: "consumer.commit_offsets",
+  GROUP_JOIN: "consumer.group_join",
+  FETCH_START: "consumer.fetch_start",
+  FETCH: "consumer.fetch",
+  START_BATCH_PROCESS: "consumer.start_batch_process",
+  END_BATCH_PROCESS: "consumer.end_batch_process",
+  CONNECT: "consumer.connect",
+  DISCONNECT: "consumer.disconnect",
+  STOP: "consumer.stop",
+  CRASH: "consumer.crash",
+  REBALANCING: "consumer.rebalancing",
+  RECEIVED_UNSUBSCRIBED_TOPICS: "consumer.received_unsubscribed_topics",
+  REQUEST: "consumer.network.request",
+  REQUEST_TIMEOUT: "consumer.network.request_timeout",
+  REQUEST_QUEUE_SIZE: "consumer.network.request_queue_size",
+} as const;
+
+// Track event handlers registered on the most-recently-created consumer so tests
+// can fire kafkajs-style events (GROUP_JOIN, HEARTBEAT, REBALANCING, DISCONNECT)
+// against the wiring set up by setupKafka.
+type Handlers = Map<string, Array<(payload: unknown) => void>>;
+let lastConsumerHandlers: Handlers | null = null;
+
+function triggerConsumerEvent(eventName: string, payload: unknown = {}): void {
+  if (!lastConsumerHandlers) {
+    throw new Error("no consumer created yet — call setupKafka first");
+  }
+  const fns = lastConsumerHandlers.get(eventName) ?? [];
+  for (const fn of fns) fn(payload);
+}
+
 vi.mock("kafkajs", () => {
   return {
     Kafka: vi.fn().mockImplementation(() => ({
       producer: () => ({ connect: connectMock, send: sendMock }),
       consumer: (cfg: { groupId: string }) => {
         consumerCreatedWithMock(cfg);
+        const handlers: Handlers = new Map();
+        lastConsumerHandlers = handlers;
         return {
           connect: consumerConnectMock,
           subscribe: subscribeMock,
           run: runMock,
+          events: consumerEvents,
+          on(eventName: string, handler: (payload: unknown) => void) {
+            const list = handlers.get(eventName) ?? [];
+            list.push(handler);
+            handlers.set(eventName, list);
+            return () => {
+              const cur = handlers.get(eventName);
+              if (!cur) return;
+              const idx = cur.indexOf(handler);
+              if (idx >= 0) cur.splice(idx, 1);
+            };
+          },
         };
       },
     })),
@@ -258,8 +306,7 @@ describe("setupKafka — Phase 2.b canary integration", () => {
     expect(consumedEventStore.all()).toHaveLength(0);
   });
 
-  it("recordPoll is called for each message regardless of filter result", async () => {
-    // Use canary pod: it skips non-canary messages, so we get both filtered and processed paths.
+  it("wires kafkajs consumer events into KafkaHealthState (group_join/rebalancing/heartbeat/disconnect)", async () => {
     process.env.VERSION = "canary";
 
     const kafkaHandle = await setupKafka({
@@ -269,14 +316,31 @@ describe("setupKafka — Phase 2.b canary integration", () => {
       presenceWatcherEnabled: false,
     });
 
-    const eachMessage = await captureEachMessage();
-    const recordPollSpy = vi.spyOn(kafkaHandle.health, "recordPoll");
+    // Wait for setupKafka's background consumer setup to register handlers.
+    await vi.waitFor(() => {
+      expect(lastConsumerHandlers?.get("consumer.group_join")?.length ?? 0).toBeGreaterThan(0);
+      expect(lastConsumerHandlers?.get("consumer.heartbeat")?.length ?? 0).toBeGreaterThan(0);
+      expect(lastConsumerHandlers?.get("consumer.rebalancing")?.length ?? 0).toBeGreaterThan(0);
+      expect(lastConsumerHandlers?.get("consumer.disconnect")?.length ?? 0).toBeGreaterThan(0);
+    });
 
-    // Drive 3 messages: two without x-canary (filtered out), one with x-canary (processed).
-    await eachMessage({ topic: "orders.events", partition: 0, message: { headers: {}, key: Buffer.from("k1"), value: Buffer.from("{}") } });
-    await eachMessage({ topic: "payments.events", partition: 0, message: { headers: {}, key: Buffer.from("k2"), value: Buffer.from("{}") } });
-    await eachMessage({ topic: "orders.events", partition: 0, message: { headers: { "x-canary": Buffer.from("true") }, key: Buffer.from("k3"), value: Buffer.from("{}") } });
+    const markAssignedSpy = vi.spyOn(kafkaHandle.health, "markAssigned");
+    const markRevokedSpy = vi.spyOn(kafkaHandle.health, "markRevoked");
+    const recordHeartbeatSpy = vi.spyOn(kafkaHandle.health, "recordHeartbeat");
 
-    expect(recordPollSpy).toHaveBeenCalledTimes(3);
+    triggerConsumerEvent("consumer.group_join");
+    triggerConsumerEvent("consumer.heartbeat");
+    triggerConsumerEvent("consumer.heartbeat");
+    triggerConsumerEvent("consumer.rebalancing");
+    triggerConsumerEvent("consumer.disconnect");
+
+    expect(markAssignedSpy).toHaveBeenCalledTimes(1);
+    expect(recordHeartbeatSpy).toHaveBeenCalledTimes(2);
+    // REBALANCING + DISCONNECT both call markRevoked.
+    expect(markRevokedSpy).toHaveBeenCalledTimes(2);
+
+    // After GROUP_JOIN + HEARTBEAT + (eventually) REBALANCING + DISCONNECT, the
+    // state machine should be unhealthy (no partitions assigned).
+    expect(kafkaHandle.health.isHealthy()).toBe(false);
   });
 });

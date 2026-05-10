@@ -113,7 +113,8 @@ describe("HTTP routes", () => {
   it("GET /health on CANARY returns 503 when kafka health state is stale", async () => {
     const { createKafkaHealthState } = await import("@canary/lib-node");
     const staleHealth = createKafkaHealthState(1);
-    staleHealth.recordPoll();
+    staleHealth.markAssigned();
+    staleHealth.recordHeartbeat();
     await new Promise<void>((r) => setTimeout(r, 10));
 
     const app = setupHttp({

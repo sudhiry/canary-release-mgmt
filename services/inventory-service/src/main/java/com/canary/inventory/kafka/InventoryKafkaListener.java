@@ -2,7 +2,6 @@ package com.canary.inventory.kafka;
 
 import com.canary.inventory.store.ConsumedEvent;
 import com.canary.inventory.store.ConsumedEventStore;
-import com.canary.platform.lib.KafkaConsumerHealthIndicator;
 import com.canary.platform.lib.XCanaryConsumeContext;
 import com.canary.platform.lib.XCanaryConsumeFilter;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -24,14 +23,11 @@ public class InventoryKafkaListener {
 
     private final ConsumedEventStore store;
     private final XCanaryConsumeFilter filter;
-    private final KafkaConsumerHealthIndicator health;
 
     public InventoryKafkaListener(ConsumedEventStore store,
-                                  XCanaryConsumeFilter filter,
-                                  KafkaConsumerHealthIndicator health) {
+                                  XCanaryConsumeFilter filter) {
         this.store = store;
         this.filter = filter;
-        this.health = health;
     }
 
     @KafkaListener(
@@ -39,7 +35,6 @@ public class InventoryKafkaListener {
         groupId = "#{xCanaryConsumerGroupIdResolver.resolve('inventory-service')}"
     )
     public void onMessage(ConsumerRecord<String, String> record) {
-        health.recordPoll();
         if (!filter.shouldProcess(record.headers())) {
             return;
         }

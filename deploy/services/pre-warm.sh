@@ -1,19 +1,12 @@
 #!/usr/bin/env bash
-# Pre-warm Kafka topics by sending baseline (non-canary) orders through the
-# saga. This is a workaround for the Phase 2.b cold-cluster boot deadlock:
-# canary pods' readiness probe is gated on KafkaConsumerHealthIndicator
-# (Java) / createKafkaHealthState (Node), which only flips to UP after
-# `recordPoll` fires — and recordPoll only fires when a real Kafka message
-# is delivered.
+# Optional: seeds consumer offsets so e2e suites can measure lag from a
+# known baseline (lag=0). With heartbeat-based readiness, canary deploys
+# no longer require this.
 #
-# On a fully cold cluster with no traffic, a freshly-deployed canary pod
-# never reaches Ready=true → never enters service endpoints → stable's
-# pod-watch never sees `canaryReady=true` → events with x-canary header
-# fall through to stable as if no canary existed.
-#
-# Sending 2-3 baseline orders here flows messages through orders.events,
-# payments.events, inventory.events, and notifications.events, which is
-# enough to satisfy every consumer's recordPoll ahead of any canary deploy.
+# Sends a few baseline (non-canary) orders through the saga, flowing
+# messages through orders.events, payments.events, inventory.events, and
+# notifications.events so every consumer group commits offsets up to the
+# current log-end before an e2e run begins.
 
 set -euo pipefail
 
@@ -38,4 +31,4 @@ for i in $(seq 1 "$COUNT"); do
   fi
 done
 
-echo "==> pre-warm complete; canary pods can now be deployed safely"
+echo "==> pre-warm complete; consumer groups now at lag=0"

@@ -21,8 +21,8 @@ export interface KafkaSetupOptions {
   namespace?: string;
   /** Disable the presence watcher entirely (e.g., for tests). */
   presenceWatcherEnabled?: boolean;
-  /** Override kafka health timeout in ms. Defaults to 30000. */
-  kafkaHealthTimeoutMs?: number;
+  /** Override heartbeat-staleness threshold in ms. Defaults to 15000. */
+  heartbeatStaleMs?: number;
   sendTimeoutMs?: number;
   reconnectIntervalMs?: number;
   /**
@@ -45,7 +45,7 @@ export async function setupKafka(opts: KafkaSetupOptions): Promise<KafkaHandle> 
   const ownVersion = opts.ownVersion ?? process.env.VERSION ?? "stable";
   const namespace = opts.namespace ?? process.env.POD_NAMESPACE ?? "services";
   const watcherEnabled = opts.presenceWatcherEnabled ?? true;
-  const health = createKafkaHealthState(opts.kafkaHealthTimeoutMs ?? 30000);
+  const health = createKafkaHealthState(opts.heartbeatStaleMs ?? 15000);
 
   const kafka = new Kafka({ clientId: "notification-service", brokers: opts.brokers });
   const sendTimeoutMs = opts.sendTimeoutMs ?? 5000;
@@ -119,6 +119,13 @@ export async function setupKafka(opts: KafkaSetupOptions): Promise<KafkaHandle> 
     const groupId = resolveConsumerGroupId("notification-service");
     const c = kafka.consumer({ groupId });
     consumer = c;
+    // Heartbeat-based readiness: drive the KafkaHealthState machine off kafkajs's
+    // own consumer events. GROUP_JOIN/REBALANCING gate the "assigned" flag and
+    // HEARTBEAT advances liveness; DISCONNECT resets us to unassigned.
+    c.on(c.events.GROUP_JOIN, () => health.markAssigned());
+    c.on(c.events.REBALANCING, () => health.markRevoked());
+    c.on(c.events.HEARTBEAT, () => health.recordHeartbeat());
+    c.on(c.events.DISCONNECT, () => health.markRevoked());
     // Background connect + subscribe + run, same rationale as producer:
     // a Kafka outage at boot must not block app.listen() or readiness probes.
     const consumerSetupPromise = (async () => {
@@ -128,8 +135,6 @@ export async function setupKafka(opts: KafkaSetupOptions): Promise<KafkaHandle> 
           await c.subscribe({ topics: ["orders.events", "payments.events"] });
           await c.run({
             eachMessage: async ({ topic, message }: EachMessagePayload) => {
-              // recordPoll fires on every message BEFORE the filter check.
-              health.recordPoll();
               // KafkaJS IHeaders is a superset of KafkaConsumeHeaders; lib only reads
               // Buffer values (calls .toString("utf8")), so the cast is safe.
               const headers = message.headers as KafkaConsumeHeaders;

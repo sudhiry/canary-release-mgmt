@@ -2,7 +2,6 @@ package com.canary.payment.kafka;
 
 import com.canary.payment.store.ConsumedEvent;
 import com.canary.payment.store.ConsumedEventStore;
-import com.canary.platform.lib.KafkaConsumerHealthIndicator;
 import com.canary.platform.lib.XCanaryConsumeContext;
 import com.canary.platform.lib.XCanaryConsumeFilter;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -24,14 +23,11 @@ public class PaymentKafkaListener {
 
     private final ConsumedEventStore store;
     private final XCanaryConsumeFilter filter;
-    private final KafkaConsumerHealthIndicator health;
 
     public PaymentKafkaListener(ConsumedEventStore store,
-                                XCanaryConsumeFilter filter,
-                                KafkaConsumerHealthIndicator health) {
+                                XCanaryConsumeFilter filter) {
         this.store = store;
         this.filter = filter;
-        this.health = health;
     }
 
     @KafkaListener(
@@ -39,7 +35,6 @@ public class PaymentKafkaListener {
         groupId = "#{xCanaryConsumerGroupIdResolver.resolve('payment-service')}"
     )
     public void onMessage(ConsumerRecord<String, String> record) {
-        health.recordPoll();
         if (!filter.shouldProcess(record.headers())) {
             return;
         }

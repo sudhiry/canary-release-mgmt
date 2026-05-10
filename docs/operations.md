@@ -21,31 +21,24 @@ make load-images             # kind load × 5
 make deploy-services         # KafkaTopics + Helm install × 5 + Istio routing
 make smoke-services          # 5 deploy assertions
 
-make pre-warm                # ⚠ run THIS before any canary on a cold cluster
+make pre-warm                # optional: seeds consumer offsets for e2e suites
 ```
 
 Total: ~10 minutes on an M-series Mac.
 
-### Cold-cluster pre-warm
+### Cold-cluster pre-warm (optional)
 
-`make pre-warm` sends 3 baseline (non-canary) orders. This flows messages
-across `orders.events`, `payments.events`, `inventory.events`, and
-`notifications.events`, satisfying every consumer's `recordPoll` ahead of
-any canary deploy.
-
-Without pre-warm, the first `make canary-deploy` deadlocks: canary pods
-gate readiness on `kafkaConsumer` health, but the consumer reaches `UP`
-only after the first delivered message — and on a fresh cluster with no
-traffic, no message is ever delivered. `helm install --wait` times out
-after 3 minutes and the deploy auto-rolls-back.
+`make pre-warm` sends 3 baseline (non-canary) orders, seeding every
+consumer group's offset. **No longer required** — heartbeat-based
+readiness lets canary pods reach Ready immediately on a cold cluster.
+Useful before running e2e suites (K1–K5) that assert lag-related
+behavior, since it gives every consumer a known starting offset.
 
 Tunable knobs (env vars):
 
 - `PRE_WARM_COUNT` (default 3)
 - `PRE_WARM_DELAY_MS` (default 1000)
 - `PRE_WARM_URL` (default `http://localhost:8080/api/orders`)
-
-`make deploy-services` prints a reminder at the end so you don't forget.
 
 ## Verifying the substrate
 
@@ -186,6 +179,7 @@ done
 | K3 | Canary NOT deployed + flagged event | Stable's store records it (graceful fallback) |
 | K4 | Kafka header propagation | Canary's audit-service consumes flagged event → its downstream Kafka events also carry `x-canary: true` |
 | K5 | Canary Kafka unhealthy | SIGSTOP'd canary → readiness fails → presence watcher flips → stable processes the next flagged event |
+| K6 | Cold-cluster bring-up | Tear down + redeploy services + canary all without `make pre-warm`; helm `--wait` succeeds + canary readiness 200 within 30s. Opt-in via `RUN_COLD_CLUSTER_TESTS=true` (skipped by default; ~4 min) |
 
 K1–K5 use `kubectl port-forward pod/<name>` (per subset) and query
 `/internal/consumed-events` directly, since Istio's subset-by-header
@@ -193,11 +187,6 @@ routing is in-mesh-only and the edge gateway only routes `/api/orders`.
 Helpers in [tests/e2e/helpers/](../tests/e2e/helpers/).
 
 ## Troubleshooting
-
-### "helm install --wait timed out" on a fresh cluster
-
-You skipped `make pre-warm`. Run it now, then the next `canary-deploy`
-will succeed.
 
 ### Canary pod stuck in `0/1 Running`, readiness 503
 
@@ -208,14 +197,16 @@ kubectl -n services exec deploy/payment-service-canary \
   -- curl -s localhost:8081/actuator/health/readiness | jq
 ```
 
-If `kafkaConsumer.status: OUT_OF_SERVICE`, the Kafka health timeout
-elapsed without a successful poll. Either:
+If `kafkaConsumer.status: OUT_OF_SERVICE`, the consumer's heartbeat has
+gone stale (Java: `last-heartbeat-seconds-ago` exceeded the threshold;
+Node: no `consumer.events.HEARTBEAT` within the threshold). Either:
 
-- the canary's consumer group hasn't joined yet (check
+- the canary's consumer hasn't joined the group yet (check
   `kafka-consumer-groups.sh --list`)
-- producers stopped (check stable pods are up)
-- timeout is set too aggressively (`canary.kafka-health-timeout-ms` /
-  `KAFKA_HEALTH_TIMEOUT_MS`)
+- the broker is unreachable from the canary pod
+- threshold is set too aggressively (`canary.kafka-heartbeat-stale-ms` /
+  `KAFKA_HEARTBEAT_STALE_MS`, default 15s; old `*-health-timeout-ms`
+  names still accepted as deprecated aliases)
 
 ### "I don't see Java consumer groups in `kafka-consumer-groups.sh --list`"
 

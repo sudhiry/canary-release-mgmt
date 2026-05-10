@@ -155,13 +155,28 @@ exactly the same propagation pattern as the inbound HTTP filter.
 @KafkaListener(topics = "orders.events",
                groupId = "#{xCanaryConsumerGroupIdResolver.resolve('payment-service')}")
 public void onMessage(ConsumerRecord<String, String> record) {
-    health.recordPoll();
     if (!filter.shouldProcess(record.headers())) return;
     XCanaryConsumeContext.runWith(record.headers(), () -> {
         store.record(...);
     });
 }
 ```
+
+Readiness is fed by consumer-group lifecycle events, not by message
+receipt. Node side, the same wiring looks like:
+
+```ts
+// kafkajs
+c.on(c.events.GROUP_JOIN, () => health.markAssigned());
+c.on(c.events.HEARTBEAT,  () => health.recordHeartbeat());
+c.on(c.events.REBALANCING, () => health.markRevoked());
+c.on(c.events.DISCONNECT, () => health.markRevoked());
+```
+
+Java reads the kafka-clients metric `last-heartbeat-seconds-ago` driven
+by a `ConsumerAwareRebalanceListener` (substituted for the spring-kafka
+4.0.4-missing `ConsumerPartitionsAssignedEvent` /
+`ConsumerPartitionsRevokedEvent`).
 
 ## Presence watching: how stable knows when canary is unavailable
 
@@ -179,8 +194,10 @@ by watch events. The consume-filter reads this flag on every message.
 ### How a canary failure becomes a stable takeover (K5 scenario)
 
 1. Canary pod's Kafka consumer wedges (network blip, GC pause, SIGSTOP, etc.).
-2. `recordPoll` stops firing on the canary's `KafkaConsumerHealthIndicator`.
-3. After `kafka-health-timeout-ms` (default 30s), the indicator reports `OUT_OF_SERVICE`.
+2. The canary's heartbeat thread is frozen by SIGSTOP, so
+   `last-heartbeat-seconds-ago` (Java) / `consumer.events.HEARTBEAT`
+   (Node) goes stale beyond `canary.kafka-heartbeat-stale-ms` (default 15s).
+3. The `KafkaConsumerHealthIndicator` reports `OUT_OF_SERVICE`.
 4. **Canary's** readiness probe fails (canary's `/health` or actuator
    `kafkaConsumer` is in the readiness group).
 5. Kubelet drops the canary pod from the EndpointSlice; pod transitions to
@@ -192,19 +209,17 @@ by watch events. The consume-filter reads this flag on every message.
 ### Why stable's `/health` is NOT Kafka-gated
 
 This was a hard-won lesson during cluster verification of Phase 2.b. The
-canary readiness gate exists to break the K5 loop. If we apply the same
-gate to stable, fresh deploys deadlock:
+canary readiness gate exists to break the K5 loop. We keep the gate
+canary-only because stable doesn't need a Kafka takeover signal — only
+canary does.
 
-- New cluster, no traffic → no Kafka messages → `recordPoll` never fires →
-  stable's readiness 503 forever → `helm install --wait` times out.
-
-Fix: stable uses `readinessState` only; canary's `canary-overlay.yaml`
+Stable uses `readinessState` only; canary's `canary-overlay.yaml`
 adds `MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: "readinessState,kafkaConsumer"`
 to opt canary alone into the Kafka gate. Same split lives in Node `/health`
 (`services/order-service/src/http.ts:35-46`).
 
-The other half of the cold-start fix is `make pre-warm` — see
-[operations.md](operations.md#cold-cluster-pre-warm).
+Cold-start is no longer a problem — `make pre-warm` is documented as an
+optional e2e helper in [operations.md](operations.md#cold-cluster-pre-warm-optional).
 
 ## RBAC: presence watcher needs `pods/watch`
 

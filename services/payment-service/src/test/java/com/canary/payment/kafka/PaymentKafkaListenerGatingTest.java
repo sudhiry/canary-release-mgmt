@@ -1,7 +1,6 @@
 package com.canary.payment.kafka;
 
 import com.canary.payment.store.ConsumedEventStore;
-import com.canary.platform.lib.KafkaConsumerHealthIndicator;
 import com.canary.platform.lib.XCanaryConsumeFilter;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.header.internals.RecordHeader;
@@ -42,30 +41,15 @@ class PaymentKafkaListenerGatingTest {
     }
 
     @Test
-    void recordPollIsCalledOnEveryMessage() {
-        runner.run(ctx -> {
-            PaymentKafkaListener listener = ctx.getBean(PaymentKafkaListener.class);
-            AtomicBoolean polled = ctx.getBean("pollFlag", AtomicBoolean.class);
-            polled.set(false);
-            listener.onMessage(record("orders.events", "k", "v", false));
-            assertThat(polled.get()).isTrue();
-        });
-    }
-
-    @Test
     void filterRejectionShortCircuits() {
         runner.run(ctx -> {
             PaymentKafkaListener listener = ctx.getBean(PaymentKafkaListener.class);
             ConsumedEventStore store = ctx.getBean(ConsumedEventStore.class);
             AtomicBoolean shouldProcess = ctx.getBean("shouldProcessFlag", AtomicBoolean.class);
-            AtomicBoolean polled = ctx.getBean("pollFlag", AtomicBoolean.class);
             shouldProcess.set(false);
-            polled.set(false);
             int before = store.all().size();
             listener.onMessage(record("orders.events", "k", "v", true));
             assertThat(store.all().size()).isEqualTo(before);
-            // recordPoll fired BEFORE filter rejected (ordering invariant for readiness gating)
-            assertThat(polled.get()).isTrue();
         });
     }
 
@@ -115,26 +99,11 @@ class PaymentKafkaListenerGatingTest {
         }
 
         @Bean
-        AtomicBoolean pollFlag() {
-            return new AtomicBoolean(false);
-        }
-
-        @Bean
         XCanaryConsumeFilter xCanaryConsumeFilter(AtomicBoolean shouldProcessFlag) {
             return new XCanaryConsumeFilter("stable", () -> false) {
                 @Override
                 public boolean shouldProcess(org.apache.kafka.common.header.Headers headers) {
                     return shouldProcessFlag.get();
-                }
-            };
-        }
-
-        @Bean
-        KafkaConsumerHealthIndicator kafkaConsumerHealthIndicator(AtomicBoolean pollFlag) {
-            return new KafkaConsumerHealthIndicator(30000) {
-                @Override
-                public void recordPoll() {
-                    pollFlag.set(true);
                 }
             };
         }

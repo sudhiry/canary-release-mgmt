@@ -36,7 +36,7 @@ make build-services && make build-images && make load-images
 make deploy-services                            # Helm install all 5 + Istio routing
 make smoke-services
 
-make pre-warm                                   # ⚠ REQUIRED before first canary on a cold cluster
+make pre-warm                                   # optional: seeds consumer offsets to lag=0 for e2e suites
 
 # Send a baseline (no header) order:
 node tools/traffic-cli/bin/traffic-cli order
@@ -94,7 +94,7 @@ canary-release-mgmt/
 |---|---|
 | Set up a fresh laptop | `pnpm install && make verify` |
 | Bring up the substrate | `make up && make smoke-infra` |
-| Build + deploy all services | `make build-services && make build-images && make load-images && make deploy-services && make pre-warm` |
+| Build + deploy all services | `make build-services && make build-images && make load-images && make deploy-services` |
 | Run all unit tests | `make verify` |
 | Run all e2e scenarios | `make e2e` (~15 min) |
 | Run the fast inner-loop e2e subset | `make ci-local` (~5 min, S1+S2+S5+S8+S9+S12) |
@@ -121,11 +121,6 @@ Don't bump the Restate server pin without testing both SDKs.
 
 ## Known issues
 
-- **Cold-cluster pre-warm.** First `canary-deploy` on a fresh cluster will
-  deadlock unless you run `make pre-warm` after `make deploy-services`.
-  Canary readiness is gated on Kafka health, which only flips UP after the
-  first delivered message. Pre-warm sends 3 baseline orders to seed every
-  consumer.
 - **K1 e2e saga timeout (deferred).** K1's flagged-saga path hangs past 5
   min on a real cluster; unit tests still pass. Tracked as a Phase 2
   follow-up — see [docs/operations.md#known-issues](docs/operations.md#known-issues).

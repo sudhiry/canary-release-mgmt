@@ -71,7 +71,8 @@ describe("HTTP routes", () => {
 
   it("GET /health on CANARY returns 503 when kafka health state is stale", async () => {
     const staleHealth = createKafkaHealthState(1);
-    staleHealth.recordPoll();
+    staleHealth.markAssigned();
+    staleHealth.recordHeartbeat();
     await new Promise<void>((r) => setTimeout(r, 10));
 
     const app = setupHttp({ ingressClient: mockAxios(), kafkaHealth: staleHealth, version: "canary" });
@@ -84,7 +85,8 @@ describe("HTTP routes", () => {
     // Stable must NOT be gated on Kafka health — see canary-overlay.yaml comment.
     // Cold-cluster boot deadlock: lastPollMs==0 → forever 503 if gated.
     const staleHealth = createKafkaHealthState(1);
-    staleHealth.recordPoll();
+    staleHealth.markAssigned();
+    staleHealth.recordHeartbeat();
     await new Promise<void>((r) => setTimeout(r, 10));
 
     const app = setupHttp({ ingressClient: mockAxios(), kafkaHealth: staleHealth, version: "stable" });

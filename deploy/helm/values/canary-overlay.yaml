@@ -17,11 +17,12 @@ env:
   KAFKA_CONSUMERS_ENABLED: "true"
   RESTATE_REGISTER_HANDLERS: "false"
   # Canary-only readiness gating: kafkaConsumer indicator must report UP
-  # (i.e. recordPoll fired within canary.kafka-health-timeout-ms). When
-  # canary's consumer dies, this flips readiness to 503 → kubelet drops
-  # the pod from EndpointSlice → stable's pod-watch sees Ready=False →
-  # stable picks up the next flagged event. Stable must NOT have this
-  # gating (see application.yml comment) or fresh deploys deadlock.
+  # (i.e. consumer joined + heartbeat fresh within
+  # canary.kafka-heartbeat-stale-ms; default 15s). When canary's consumer
+  # heartbeat thread freezes (SIGSTOP, panic, lost group membership),
+  # readiness flips to 503 → kubelet drops the pod from EndpointSlice →
+  # stable's pod-watch sees Ready=False → stable picks up the next
+  # flagged event. Stable does NOT have this gating — see application.yml.
   MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: "readinessState,kafkaConsumer"
 restate:
   registerEndpoint: false

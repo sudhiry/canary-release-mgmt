@@ -56,7 +56,7 @@ images: build-images load-images ## Build then load all 5 images
 deploy-services: ## Apply KafkaTopics + Helm install all 5 + Istio routing
 	@bash deploy/services/deploy.sh
 
-pre-warm: ## Pre-warm Kafka topics with baseline orders (run BEFORE first canary on a cold cluster)
+pre-warm: ## Send 3 baseline orders (optional; useful before e2e suites that measure consumer lag)
 	@bash deploy/services/pre-warm.sh
 
 undeploy-services: ## Remove routing, Helm releases, and KafkaTopics
