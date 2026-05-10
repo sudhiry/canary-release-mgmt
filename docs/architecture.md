@@ -251,8 +251,9 @@ context.
 
 ## Where things go next
 
-Phase 1 (HTTP canary) and Phase 2.a + 2.b (Kafka canary) are merged. Phase
-2.c (schema evolution), Phase 3 (Restate canary handler versioning), Phase 4
-(percent-split + Argo Rollouts + CI/CD), and Phase 5 (observability polish)
-are deferred. See [history.md](history.md) for a phase-by-phase log of what
-shipped and why.
+Phase 1 (HTTP canary), Phase 2.a + 2.b (Kafka canary), Phase 3.a
+(Restate substrate completion), and Phase 3.b (Restate canary handler
+versioning — β routing) are all merged. Phase 2.c (schema evolution),
+Phase 4 (percent-split + Argo Rollouts + CI/CD), and Phase 5
+(observability polish) are deferred. See [history.md](history.md) for
+a phase-by-phase log of what shipped and why.

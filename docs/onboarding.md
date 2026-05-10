@@ -198,12 +198,18 @@ node tools/traffic-cli/bin/traffic-cli order --canary
 *What just happened:* `POST /api/orders` with `x-canary: true`.
 Istio's `canary-by-header` rule routed to `order-service-stable`
 (no canary deployed there), which read the header, picked
-`CheckoutSagaStable` for orchestration (β dispatch — only
-payment-service has a canary), and called the 3 downstream
+`CheckoutSagaStable` for orchestration, and called the 3 downstream
 services. Payment's `canary-by-header` rule routed *that* hop to
 `payment-service-canary`. Response shows
 `x-served-chain: order-service=stable, inventory-service=stable,
 payment-service=canary, notification-service=stable`.
+
+> **β dispatch detail.** The handler variant is picked by the pod
+> *receiving* the request. Since order-service has no canary
+> deployed, the stable pod handles this request and picks
+> `CheckoutSagaStable`. If order-service itself had a canary, the
+> canary pod would handle flagged requests and pick
+> `CheckoutSagaCanary`.
 
 ```bash
 # 8. Now open the dashboards (next section)
@@ -217,7 +223,7 @@ make undeploy-services    # keep cluster, remove services
 make down                 # destroy the kind cluster
 ```
 
-## 5. Manual dashboard walkthrough
+## Manual dashboard walkthrough
 
 Worked example: canary on `payment-service` is deployed and flagged
 traffic is flowing (steps 6 + 7 above). This is what each dashboard

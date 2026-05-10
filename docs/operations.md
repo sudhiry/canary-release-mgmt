@@ -193,7 +193,7 @@ cluster reality (see [canary-mechanics.md](canary-mechanics.md#status-svc-and-re
 for the reconcile policy).
 
 > **Want to watch a canary deploy through the dashboards?** The
-> [onboarding doc has a worked-example walkthrough](onboarding.md#5-manual-dashboard-walkthrough)
+> [onboarding doc has a worked-example walkthrough](onboarding.md#manual-dashboard-walkthrough)
 > across Kiali, Jaeger, Grafana, Prometheus, and the Restate admin API.
 
 ## End-to-end test runs
