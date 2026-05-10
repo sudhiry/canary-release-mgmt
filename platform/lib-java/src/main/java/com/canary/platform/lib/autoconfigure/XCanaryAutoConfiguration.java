@@ -197,11 +197,13 @@ public class XCanaryAutoConfiguration {
     // cluster verification of Phase 2.b — kafka-consumer-groups.sh --list
     // showed zero Java consumer groups.
     //
-    // Build both beans here. `auto.offset.reset = earliest` is critical
-    // for canary cold-start: a brand-new <svc>-canary consumer group joins
-    // at the LATEST offset by default, missing pre-warm messages produced
-    // before it joined → recordPoll never fires → readiness 503 forever.
-    // Earliest lets canary pick up the pre-warm trail and become Ready.
+    // Build both beans here. `auto.offset.reset = earliest` is preserved
+    // from Phase 2.b: a brand-new <svc>-canary consumer group joining at
+    // the LATEST offset by default would miss any messages produced before
+    // it joined — relevant for replaying pre-existing topic data, and for
+    // pre-warm flows that seed offsets before the canary subscribes.
+    // (Cold-cluster readiness no longer depends on this; heartbeat-based
+    // gating in KafkaConsumerHealthIndicator handles it directly.)
 
     @Bean
     @ConditionalOnMissingBean(ConsumerFactory.class)
