@@ -13,7 +13,11 @@ export default defineConfig({
     environment: "node",
     globals: false,
     testTimeout: 5 * 60_000,
-    hookTimeout: 5 * 60_000,
+    // 15 min hook timeout: a K-scenario beforeAll deploys 5 canaries
+    // sequentially; under continuous pre-warm each canary takes ~90-120s
+    // to satisfy its kafkaConsumer readiness gate, so 5 × 2min = 10min
+    // worst case. Default 5min is too tight.
+    hookTimeout: 15 * 60_000,
     pool: "forks",
     poolOptions: {
       forks: { singleFork: true },
