@@ -712,7 +712,7 @@ export async function setupKafka(opts: KafkaSetupOptions): Promise<KafkaHandle> 
 
   let presenceWatcher: XCanaryPresenceWatcher | null = null;
   if (watcherEnabled && ownVersion === "stable") {
-    presenceWatcher = new XCanaryPresenceWatcher({ namespace, serviceName: "order-service" });
+    presenceWatcher = new XCanaryPresenceWatcher(namespace, "order-service");
     await presenceWatcher.start().catch((err) => {
       console.warn(`order-service presence watcher start failed: ${err}; canary will be treated as not-ready`);
     });
@@ -871,7 +871,7 @@ await setupRestate({
 
 const shutdown = async () => {
   console.log("order-service shutting down");
-  if (kafka.presenceWatcher) await kafka.presenceWatcher.stop().catch(() => {});
+  if (kafka.presenceWatcher) kafka.presenceWatcher.close();
   if (kafka.consumer) await kafka.consumer.disconnect().catch(() => {});
   if (kafka.producer) await kafka.producer.disconnect().catch(() => {});
   server.close();
