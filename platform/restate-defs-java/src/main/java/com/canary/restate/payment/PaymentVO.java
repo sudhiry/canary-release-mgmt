@@ -14,4 +14,11 @@ import dev.restate.sdk.annotation.VirtualObject;
 public abstract class PaymentVO {
     @Handler
     public abstract Charge charge(ChargeRequest req);
+
+    /**
+     * Refund the existing charge for the keyed orderId. Idempotent on already-refunded
+     * state. Throws {@code TerminalException} if no charge exists for the key.
+     */
+    @Handler
+    public abstract Charge refund(ChargeRequest req);
 }
