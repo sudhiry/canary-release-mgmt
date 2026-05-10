@@ -216,6 +216,34 @@ by a `ConsumerAwareRebalanceListener` (substituted for the spring-kafka
 4.0.4-missing `ConsumerPartitionsAssignedEvent` /
 `ConsumerPartitionsRevokedEvent`).
 
+### Sequence: K1 — flagged event reaches canary, skipped by stable
+
+This is the K1 e2e scenario. Both subsets receive the record (different
+consumer groups, same topic); the per-message filter decides who acts.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Prod as order-service-canary<br/>(producer)
+    participant Topic as Kafka topic<br/>orders.events
+    participant AC as audit-service-canary<br/>group: audit-service-canary
+    participant AS as audit-service-stable<br/>group: audit-service-stable
+
+    Prod->>Topic: produce record<br/>header x-canary=true<br/>(stamped by XCanaryKafkaProducerInterceptor)
+    Topic->>AC: deliver (canary group offset advances)
+    Topic->>AS: deliver (stable group offset advances)
+
+    AC->>AC: XCanaryConsumeFilter.shouldProcess()<br/>own=canary, header=true → TRUE
+    AC->>AC: XCanaryConsumeContext.runWith()<br/>append to consumedEventStore
+
+    AS->>AS: XCanaryConsumeFilter.shouldProcess()<br/>own=stable, header=true, canaryReady=true → FALSE
+    note over AS: skip — no side effects,<br/>offset still committed
+```
+
+K2 (unflagged event) is the mirror image: stable processes, canary
+skips. K3 (flagged event, no canary deployed) is the graceful fallback
+— stable's filter returns TRUE because `canaryReady=false`.
+
 ## Presence watching: how stable knows when canary is unavailable
 
 The graceful-fallback rule "stable processes flagged messages when canary
