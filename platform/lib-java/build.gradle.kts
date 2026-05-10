@@ -9,6 +9,9 @@ dependencies {
     api(libs.spring.kafka)
     api(libs.restate.sdk.api)
     api(libs.restate.sdk.common)
+    api(libs.micrometer.tracing.bridge.otel)
+    api(libs.opentelemetry.exporter.otlp)
+    api(libs.opentelemetry.spring.boot.starter)
 
     implementation("io.fabric8:kubernetes-client:7.4.0")
 
