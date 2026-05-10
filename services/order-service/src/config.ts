@@ -19,10 +19,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     KAFKA_CONSUMERS_ENABLED: env.KAFKA_CONSUMERS_ENABLED !== "false",
     KAFKA_PRODUCER_ENABLED: env.KAFKA_PRODUCER_ENABLED !== "false",
     KAFKA_HEARTBEAT_STALE_MS: (() => {
-      if (env.KAFKA_HEARTBEAT_STALE_MS !== undefined) {
+      if (env.KAFKA_HEARTBEAT_STALE_MS) {
         return Number(env.KAFKA_HEARTBEAT_STALE_MS);
       }
-      if (env.KAFKA_HEALTH_TIMEOUT_MS !== undefined) {
+      if (env.KAFKA_HEALTH_TIMEOUT_MS) {
         console.warn(
           "KAFKA_HEALTH_TIMEOUT_MS is deprecated; use KAFKA_HEARTBEAT_STALE_MS",
         );

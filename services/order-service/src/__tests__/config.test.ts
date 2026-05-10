@@ -46,14 +46,23 @@ describe("loadConfig", () => {
     const cfg = loadConfig({ KAFKA_HEALTH_TIMEOUT_MS: "7000" });
     expect(cfg.KAFKA_HEARTBEAT_STALE_MS).toBe(7000);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("deprecated"));
+    expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
   });
 
   it("new var wins over deprecated alias", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const cfg = loadConfig({
       KAFKA_HEARTBEAT_STALE_MS: "1000",
       KAFKA_HEALTH_TIMEOUT_MS: "9999",
     });
     expect(cfg.KAFKA_HEARTBEAT_STALE_MS).toBe(1000);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("treats empty string KAFKA_HEARTBEAT_STALE_MS as unset", () => {
+    const cfg = loadConfig({ KAFKA_HEARTBEAT_STALE_MS: "" });
+    expect(cfg.KAFKA_HEARTBEAT_STALE_MS).toBe(15000);
   });
 });
