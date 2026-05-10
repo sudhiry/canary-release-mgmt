@@ -179,6 +179,7 @@ done
 | K3 | Canary NOT deployed + flagged event | Stable's store records it (graceful fallback) |
 | K4 | Kafka header propagation | Canary's audit-service consumes flagged event → its downstream Kafka events also carry `x-canary: true` |
 | K5 | Canary Kafka unhealthy | SIGSTOP'd canary → readiness fails → presence watcher flips → stable processes the next flagged event |
+| K6 | Cold-cluster bring-up | Tear down + redeploy services + canary all without `make pre-warm`; helm `--wait` succeeds + canary readiness 200 within 30s. Opt-in via `RUN_COLD_CLUSTER_TESTS=true` (skipped by default; ~4 min) |
 
 K1–K5 use `kubectl port-forward pod/<name>` (per subset) and query
 `/internal/consumed-events` directly, since Istio's subset-by-header
