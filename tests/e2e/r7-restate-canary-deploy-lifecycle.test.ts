@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { listServices } from "./helpers/restate-admin.js";
+import { listDeployments, listServices } from "./helpers/restate-admin.js";
 import { sendOrder } from "./helpers/traffic.js";
 
 const execFileAsync = promisify(execFile);
@@ -75,7 +75,27 @@ const RUN = process.env.RUN_CANARY_LIFECYCLE_TESTS === "true";
     }
   });
 
-  it("retiring canary leaves stable functional", async () => {
+  it("canary teardown: in-flight isolation + stable continues to serve", async () => {
+    // This test models the "kill canary while invocations are in flight"
+    // scenario that Restate's docs (https://docs.restate.dev/services/versioning)
+    // address via pause-resume. β disables pause-resume by construction —
+    // *Canary and *Stable are distinct services, so a CheckoutSagaCanary
+    // invocation cannot be resumed onto the stable deployment. We assert the
+    // structural behavior: in-flight *Canary deployments stay registered with
+    // Restate after Helm uninstall (Restate retries dead URLs forever until
+    // explicitly DELETE'd from the admin), but new traffic to *Stable services
+    // continues to work.
+
+    // Snapshot canary deployment ids before teardown so we can assert their
+    // post-uninstall fate.
+    const before = await listDeployments();
+    const canaryDeploymentIds = before
+      .filter((d) =>
+        d.services.some((s) => s.name.endsWith("Canary")),
+      )
+      .map((d) => d.id);
+    expect(canaryDeploymentIds.length).toBeGreaterThan(0);
+
     // Tear down canary releases for each service.
     for (const svc of [
       "inventory-service",
@@ -107,6 +127,20 @@ const RUN = process.env.RUN_CANARY_LIFECYCLE_TESTS === "true";
       // No canary pods to wait for — that's fine.
     }
 
+    // Restate STILL has the canary deployments registered, even though their
+    // URLs are now unreachable. This is the documented β cost: operator must
+    // explicitly DELETE the canary deployment(s) from Restate before any
+    // future canary install can claim the same URL. R7 surfaces this so
+    // operators don't expect automatic cleanup.
+    const after = await listDeployments();
+    const stillRegistered = after
+      .filter((d) => canaryDeploymentIds.includes(d.id))
+      .map((d) => d.id);
+    expect(
+      stillRegistered,
+      "β cost: canary deployments remain registered with Restate after Helm uninstall — operator must `restate deployments remove` to clean up",
+    ).toEqual(expect.arrayContaining(canaryDeploymentIds));
+
     // Issue an unflagged request — stable path should still work.
     const stableResp = await sendOrder({
       user: "r7-retire-stable",
@@ -127,5 +161,7 @@ const RUN = process.env.RUN_CANARY_LIFECYCLE_TESTS === "true";
     ]);
 
     // Note: this test does not re-install canary. Operator must redeploy after.
+    // To fully clean up before redeploy: `restate deployments remove <id>` for
+    // each id in `canaryDeploymentIds` captured above.
   }, 180_000);
 });

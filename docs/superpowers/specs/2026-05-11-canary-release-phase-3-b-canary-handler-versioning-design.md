@@ -35,8 +35,9 @@ Stable and canary register as *distinct* services (e.g., `CheckoutSagaStable` vs
 - Per-canary-handler duplication of service-name registration.
 - Restate UI shows 4 logical services × 2 variants = 8 entries.
 - In-flight invocations on a torn-down canary deployment retry indefinitely; operator must intervene to drain (no automatic drainage like α). Documented runbook.
+- **Restate's documented `restate invocations pause` / `restate invocations resume --deployment <id>` recovery is unavailable in β.** Pause-resume requires the resume target to expose the same service name as the original deployment; β registers `*Canary` and `*Stable` as distinct services, so a `CheckoutSagaCanary` invocation cannot be resumed onto a deployment that hosts only `CheckoutSagaStable`. β operators must either drain naturally or `restate invocations cancel <id>` — see Operational runbook.
 
-**Why chosen:** consistency with Phase 1+2's `x-canary` semantics is the project's central thesis. β preserves end-to-end header routing through Restate at the cost of name-duplication.
+**Why chosen:** consistency with Phase 1+2's `x-canary` semantics is the project's central thesis. β preserves end-to-end header routing through Restate at the cost of name-duplication and forfeits the pause-resume recovery primitive.
 
 ## Architecture
 
@@ -373,14 +374,52 @@ R6 is the headline fast-path subset-isolation assertion. R7 is the headline clus
 
 ## Operational runbook (canary teardown)
 
-To retire a canary deployment while in-flight invocations exist:
+Restate's official versioning docs (https://docs.restate.dev/services/versioning) recommend two recovery mechanisms for retiring a deployment that still has in-flight work:
 
-1. Stop new `x-canary: true` traffic at the Istio layer (e.g., set the VirtualService route to 100% stable subset).
-2. Wait for in-flight `*Canary` invocations to drain. Inspect via Restate Admin UI (`GET /invocations` filtered by deployment).
-3. Once drained, `DELETE /deployments/<canary-deployment-id>` via Restate Admin to deregister the `*Canary` services.
-4. `helm uninstall <canary-release>` to remove the canary pods and the `<name>-canary` K8s Service.
+1. **Drain-then-remove** — `restate deployment describe <id> --extra` to inventory in-flights; `restate deployments remove <id>` only succeeds once drained.
+2. **Pause-resume** (highlighted as the *preferred* method for stuck/buggy in-flights) — `restate invocations pause <id>` then `restate invocations resume <id> --deployment <new_id>`, where `<new_id>` is a different deployment of the **same service**.
 
-Skipping step 2 leaves Restate retrying dead URLs indefinitely. Skipping step 3 means future Helm install attempts that re-register at the same URL will collide.
+**β disables pause-resume by construction.** Stable and canary register as distinct services (`*Stable` vs `*Canary`); a `CheckoutSagaCanary` invocation cannot be resumed onto the stable deployment because that deployment doesn't host `CheckoutSagaCanary`. Replay would fail with "service not found." Recovery in β is therefore limited to drain-and-remove, with `restate invocations cancel` as the only escape hatch for stuck work.
+
+### Procedure
+
+1. **Stop new flagged traffic.** Edit the Istio VirtualService route to 100% stable subset, or remove the canary subset rule. New `x-canary: true` requests now hit the stable saga.
+
+2. **Inventory in-flight `*Canary` invocations:**
+   ```
+   restate deployment describe <canary-deployment-id> --extra
+   ```
+
+3. **Drain — choose mode:**
+
+   **(a) Graceful (preferred when latency budget allows).** Let in-flights finish naturally. `ReservationWorkflowCanary.run` parks on a 120s timer, so worst-case wait per saga is ~2 minutes. Watch:
+   ```
+   watch restate deployment describe <canary-deployment-id> --extra
+   ```
+   Wait until the in-flight count is 0.
+
+   **(b) Emergency (when canary pods are gone or the deployment is genuinely buggy).** Cancel each in-flight invocation:
+   ```
+   for id in $(restate invocations list --deployment <canary-deployment-id> --json | jq -r '.[].id'); do
+     restate invocations cancel "$id"
+   done
+   ```
+   Cancellation triggers Restate's compensation path *only if the saga catches the cancellation signal* — the current Phase 3.b sagas do not handle cancellation explicitly, so durable side effects (Charges in `succeeded` state, Reservations in `reserved` state) may be left mid-flight. Operators must manually reconcile via the per-service Admin endpoints (`POST /api/orders/<id>/refund`, `POST /api/reservations/<id>/release`, etc.) if applicable. Document this trade-off when running emergency drain.
+
+   *Pause-resume is not an option.* If a future operator runs `restate invocations resume <id> --deployment <stable-deployment-id>`, Restate will refuse — the stable deployment doesn't expose `CheckoutSagaCanary`. This is by design.
+
+4. **Deregister the canary deployment from Restate:**
+   ```
+   restate deployments remove <canary-deployment-id>
+   ```
+   (Add `--force` only if step 3 used emergency mode and you've already accepted the partial-state cost.)
+
+5. **Tear down the K8s release:**
+   ```
+   helm uninstall <canary-release> -n services
+   ```
+
+Skipping step 3 leaves Restate retrying dead URLs indefinitely. Skipping step 4 means future canary installs that re-register at the same URL will collide.
 
 ## Operational expectations
 

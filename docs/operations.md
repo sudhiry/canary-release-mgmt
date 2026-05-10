@@ -301,9 +301,31 @@ independent layers (registration, in-saga client construction, K8s
 endpoint selection) — a `*Canary` invocation cannot reach a stable
 handler.
 
-The trade-off: in-flight invocations on a torn-down canary deployment
-retry indefinitely. Operator runbook for canary teardown: stop new
-flagged traffic at Istio, drain in-flights via Restate Admin, DELETE
-the canary deployment from Restate, then `helm uninstall` the canary
-release. See the Phase 3.b spec at
-`docs/superpowers/specs/2026-05-11-canary-release-phase-3-b-canary-handler-versioning-design.md`.
+**Trade-off — Restate's pause-resume recovery is unavailable in β.**
+Restate's [versioning docs](https://docs.restate.dev/services/versioning)
+recommend `restate invocations pause <id>` followed by
+`restate invocations resume <id> --deployment <new_id>` as the
+preferred mechanism for redirecting in-flight work off a buggy or
+torn-down deployment. That primitive requires the resume target to
+expose the **same service name** as the original. β registers
+`CheckoutSagaCanary` and `CheckoutSagaStable` as **distinct services**,
+so a `*Canary` invocation cannot be resumed onto the stable deployment
+— Restate would fail with "service not found." This is a structural
+cost of choosing β over α, not a bug.
+
+Canary teardown in β therefore has only two drain modes:
+
+- **Graceful** — `restate deployment describe <canary-id> --extra`,
+  wait for in-flight count to reach 0 (worst case ~120s per parked
+  reservation workflow), then `restate deployments remove <canary-id>`
+  and `helm uninstall <release>`.
+- **Emergency** — `restate invocations cancel <id>` for each in-flight,
+  then `restate deployments remove <canary-id> --force`. The current
+  sagas don't handle cancellation explicitly, so durable side effects
+  (charges, reservations) may be left mid-state and require manual
+  reconciliation via the per-service admin endpoints.
+
+Full runbook (with the explicit Restate CLI commands and
+graceful-vs-emergency decision flow): see the Phase 3.b spec at
+`docs/superpowers/specs/2026-05-11-canary-release-phase-3-b-canary-handler-versioning-design.md`,
+section "Operational runbook (canary teardown)".
