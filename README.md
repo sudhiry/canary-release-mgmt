@@ -57,6 +57,7 @@ For a new developer, read in this order:
 
 | Document | What's in it |
 |---|---|
+| [docs/onboarding.md](docs/onboarding.md) | **Start here.** Mental model, first-30-minutes commands, dashboard walkthrough |
 | [docs/architecture.md](docs/architecture.md) | System map, the 5 services, repo layout, lib-java vs lib-node primitives |
 | [docs/canary-mechanics.md](docs/canary-mechanics.md) | How `x-canary` propagates, per-subset Kafka groups, presence-watch protocol, `canary-ctl` lifecycle |
 | [docs/development.md](docs/development.md) | Prereqs, build, test, run a service in isolation, env vars, Spring Boot 4 quirks |
