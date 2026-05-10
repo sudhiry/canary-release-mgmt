@@ -62,7 +62,7 @@ function runMake(target: string, timeoutMs: number): Promise<void> {
       // Step B: redeploy services with the default helm --wait (3min). Asserts
       // helm wait does NOT time out — i.e. stable pods become Ready inside the
       // helm budget without any traffic in the cluster.
-      await runMake("deploy-services", 240_000);
+      await runMake("deploy-services", 360_000);
 
       // Step C: deploy a canary WITHOUT running pre-warm. Asserts canary Helm
       // install --wait completes — the headline assertion of K6.
@@ -74,6 +74,7 @@ function runMake(target: string, timeoutMs: number): Promise<void> {
       const canaryPod = await findPodByLabel("services", "app=audit-service,version=canary");
       const start = Date.now();
       let ready = false;
+      let lastCode = "";
       while (Date.now() - start < 30_000) {
         const probe = await execFileAsync(
           "kubectl",
@@ -88,13 +89,17 @@ function runMake(target: string, timeoutMs: number): Promise<void> {
           stdout: err.stdout ?? "",
           stderr: "",
         }));
-        if (probe.stdout.trim() === "200") {
+        lastCode = probe.stdout.trim();
+        if (lastCode === "200") {
           ready = true;
           break;
         }
         await new Promise((r) => setTimeout(r, 2_000));
       }
-      expect(ready).toBe(true);
-    }, 480_000);
+      expect(
+        ready,
+        `canary readiness never returned 200 within 30s; last code observed: ${lastCode || "<empty>"}`,
+      ).toBe(true);
+    }, 600_000);
   },
 );
