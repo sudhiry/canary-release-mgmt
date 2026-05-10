@@ -1,1 +1,3 @@
 com.canary.platform.lib.autoconfigure.XCanaryAutoConfiguration
+com.canary.platform.lib.observability.CanaryMetricsAutoConfiguration
+com.canary.platform.lib.observability.TracingAutoConfiguration

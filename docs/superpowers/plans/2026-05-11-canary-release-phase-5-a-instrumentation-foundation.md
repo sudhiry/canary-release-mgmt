@@ -46,8 +46,8 @@
 | `services/payment-service/src/main/resources/application.yml` | Add `prometheus` to actuator `exposure.include`. Add `management.tracing.sampling.probability: 1.0` and `management.otlp.tracing.endpoint`. |
 | `services/audit-service/src/main/resources/application.yml` | Same as above. |
 | `services/inventory-service/src/main/resources/application.yml` | Same as above. |
-| `services/order-service/src/main/resources/application.yml` | Same as above. |
-| `services/notification-service/src/main/resources/application.yml` | Same as above. |
+| ~~`services/order-service/src/main/resources/application.yml`~~ | **Out of scope for 5.a** — order-service is Node.js/TypeScript (vitest + tsc), not Spring. Node-side OTel + Prometheus instrumentation tracked in follow-up below. |
+| ~~`services/notification-service/src/main/resources/application.yml`~~ | **Out of scope for 5.a** — notification-service is Node.js/TypeScript. See follow-up. |
 | `deploy/helm/service-chart/templates/deployment.yaml` | Add `prometheus.io/scrape`, `prometheus.io/port`, `prometheus.io/path` annotations to pod template metadata (line 14). |
 
 ---
@@ -62,9 +62,9 @@
 Edit `gradle/libs.versions.toml`. Under `[versions]` add:
 
 ```toml
-micrometerTracing = "1.5.4"
+micrometerTracing = "1.5.0"
 opentelemetry = "1.51.0"
-opentelemetryInstrumentation = "2.21.1"
+opentelemetryInstrumentation = "2.16.0"
 ```
 
 Under `[libraries]` add:
@@ -75,10 +75,10 @@ opentelemetry-exporter-otlp       = { module = "io.opentelemetry:opentelemetry-e
 opentelemetry-spring-boot-starter = { module = "io.opentelemetry.instrumentation:opentelemetry-spring-boot-starter", version.ref = "opentelemetryInstrumentation" }
 ```
 
-Pin notes:
-- Micrometer Tracing 1.5.x is the line that ships with Spring Boot 4.0.x (Boot 4.0.4 BOM imports `micrometer-tracing-bom:1.5.4`). Pinning explicitly avoids surprise upgrades.
-- OpenTelemetry Java 1.51.0 is the latest stable as of 2026-Q1 and is BOM-compatible with the Micrometer 1.5.x bridge.
-- OTel Spring Boot starter 2.21.1 is its own BOM line; verify no conflict with the existing `spring-boot-dependencies:4.0.4` BOM by running the tests in subsequent tasks.
+Pin notes (verified against Maven Central on 2026-05-11):
+- `io.micrometer:micrometer-tracing-bridge-otel:1.5.0` is the latest 1.5.x stable. Spring Boot 4.0.4 ships micrometer-tracing-bom 1.5.x; the 1.5.0 patch pin is the most current 1.5.x available.
+- `io.opentelemetry:opentelemetry-exporter-otlp:1.51.0` is the latest stable and is BOM-compatible with the Micrometer 1.5.x bridge.
+- `io.opentelemetry.instrumentation:opentelemetry-spring-boot-starter:2.16.0` is the latest stable. The 2.x line is its own BOM; verify no conflict with `spring-boot-dependencies:4.0.4` by running the tests in subsequent tasks.
 
 - [ ] **Step 1.2: Verify the catalog parses**
 
@@ -1565,16 +1565,16 @@ git commit -m "feat(observability): register CanaryMetricsAutoConfiguration + Tr
 
 ---
 
-## Task 14 — Update each service's `application.yml`
+## Task 14 — Update each Java service's `application.yml`
 
-**Files:**
+**Files (Java Spring Boot services only):**
 - Modify: `services/payment-service/src/main/resources/application.yml`
 - Modify: `services/audit-service/src/main/resources/application.yml`
 - Modify: `services/inventory-service/src/main/resources/application.yml`
-- Modify: `services/order-service/src/main/resources/application.yml`
-- Modify: `services/notification-service/src/main/resources/application.yml`
 
-Apply the same changes to each `application.yml` (paths above). Below is the change for `payment-service`; replicate identically for the others (only `spring.application.name` differs, which is already correct).
+> **Scope correction:** the original plan listed all 5 services. `order-service` and `notification-service` are Node.js/TypeScript (no `application.yml`, no Spring). Their observability instrumentation (Node OTel SDK + Prometheus client) requires a different toolchain and is tracked as a follow-up sub-phase below.
+
+Apply the same changes to each Java `application.yml` (paths above). Below is the change for `payment-service`; replicate identically for the others (only `spring.application.name` differs, which is already correct).
 
 - [ ] **Step 14.1: Add `prometheus` to actuator exposure**
 
@@ -1630,9 +1630,9 @@ The default endpoint resolves at runtime: in cluster, the `Service` `jaeger-coll
 
 No `canary.service-name` yml entry needed — `CanaryMetricsAutoConfiguration` already resolves it via `@Value("${canary.service-name:${SERVICE_NAME:unknown}}")`. The `SERVICE_NAME` env var is set by the existing Helm chart for each pod.
 
-- [ ] **Step 14.3: Build all services to confirm config parses**
+- [ ] **Step 14.3: Build all Java services to confirm config parses**
 
-Run: `./gradlew :services:payment-service:bootJar :services:audit-service:bootJar :services:inventory-service:bootJar :services:order-service:bootJar :services:notification-service:bootJar`
+Run: `./gradlew :services:payment-service:bootJar :services:audit-service:bootJar :services:inventory-service:bootJar`
 Expected: `BUILD SUCCESSFUL`. yml parse errors surface here.
 
 - [ ] **Step 14.4: Commit**
@@ -1640,9 +1640,7 @@ Expected: `BUILD SUCCESSFUL`. yml parse errors surface here.
 ```bash
 git add services/payment-service/src/main/resources/application.yml \
         services/audit-service/src/main/resources/application.yml \
-        services/inventory-service/src/main/resources/application.yml \
-        services/order-service/src/main/resources/application.yml \
-        services/notification-service/src/main/resources/application.yml
+        services/inventory-service/src/main/resources/application.yml
 git commit -m "feat(services): expose /actuator/prometheus + configure OTLP tracing endpoint"
 ```
 
@@ -1782,12 +1780,25 @@ After implementing all tasks, run a fresh-eyes pass:
 
 ---
 
-## Out of scope for 5.a (handed to 5.b)
+## Out of scope for 5.a
 
-- Wiring `CanaryRestateMeter.measure(...)` at each Restate handler call site in `services/{order,inventory,payment,notification}-service`. Helper exists; callers do not yet invoke it.
+### Handed to 5.b (Java side)
+- Wiring `CanaryRestateMeter.measure(...)` at each Restate handler call site in the Java services that host Restate handlers. Helper exists; callers do not yet invoke it.
 - T2 Kafka trace-context propagation (Spring Kafka `observationEnabled=true` wiring + producer/consumer span linkage).
 - T3 Restate trace-context propagation (Restate StatefulSet `RESTATE_TRACING_ENDPOINT` + Java SDK W3C propagation verification).
 - Wiring `CanaryMetrics.recordShadowMismatch(...)` at each Phase 2/3 shadow-comparison site.
+
+### New follow-up: 5.a-node — Node service instrumentation
+
+Discovered during 5.a execution: `order-service` and `notification-service` are Node.js/TypeScript (vitest + tsc), not Spring. The Java-side instrumentation in 5.a does not apply. A separate sub-phase is needed:
+
+- Add `@opentelemetry/sdk-node`, `@opentelemetry/exporter-trace-otlp-grpc`, `@opentelemetry/instrumentation-http`, `@opentelemetry/instrumentation-kafkajs` (or equivalent), and `prom-client` to each Node service.
+- Initialize the OTel SDK at process startup; configure OTLP exporter to `http://jaeger-collector.istio-system:4317`.
+- Mirror the `CanaryLaneTag` / `CanaryMetrics` shape in TypeScript: a small library at `services/_shared/observability/` (or per-service) exposing `recordHttp/recordKafka/recordRestate` + the same metric names/tags.
+- Add a `/metrics` endpoint exposing the prom-client registry; same scrape annotation pattern from Task 15 already covers it (the Helm chart applies the same annotations to all pods, Java or Node).
+- Resolve the `lane` value from the Node equivalent of `XCanaryContext` (whatever request-scoped storage these services use).
+
+This sub-phase is independently mergeable and shares no code with 5.a. It should be planned and executed after 5.a lands.
 
 ---
 

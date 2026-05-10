@@ -22,7 +22,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
   endpoint:
     health:
       probes:
@@ -37,3 +37,10 @@ management:
           # Stable does NOT need it (and gating stable on it caused the cold-
           # cluster boot deadlock: lastPollMs==0 → readiness 503 forever).
           include: readinessState
+  tracing:
+    sampling:
+      probability: 1.0
+  otlp:
+    tracing:
+      endpoint: ${OTLP_TRACING_ENDPOINT:http://jaeger-collector.istio-system:4317}
+      transport: grpc
