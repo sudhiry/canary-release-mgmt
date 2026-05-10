@@ -177,7 +177,7 @@ sequenceDiagram
     participant K8s as K8s API
 
     Dev->>CLI: make canary-rollback SVC=<s>
-    CLI->>State: read; write phase=rolling-back
+    CLI->>State: read, write phase=rolling-back
     CLI->>VS: patch — rules = [default]<br/>(remove canary-by-header)
     note over CLI: no new flagged traffic<br/>reaches canary
     CLI->>CLI: sleep --grace-seconds (default 10s)<br/>in-flight requests drain
