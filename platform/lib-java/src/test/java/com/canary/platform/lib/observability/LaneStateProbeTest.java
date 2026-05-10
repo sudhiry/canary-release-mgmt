@@ -46,9 +46,9 @@ class LaneStateProbeTest {
         probe.start();
 
         Gauge stable = registry.find("canary_lane_active")
-                .tags("service", "payment", "lane", "stable").gauge();
+                .tags("substrate", "http", "service", "payment", "lane", "stable").gauge();
         Gauge canary = registry.find("canary_lane_active")
-                .tags("service", "payment", "lane", "canary").gauge();
+                .tags("substrate", "http", "service", "payment", "lane", "canary").gauge();
         assertThat(stable).isNotNull();
         assertThat(canary).isNotNull();
         assertThat(stable.value()).isEqualTo(0.0);
@@ -65,7 +65,7 @@ class LaneStateProbeTest {
         probe.setLaneActive("canary", true);
 
         Gauge canary = registry.find("canary_lane_active")
-                .tags("service", "payment", "lane", "canary").gauge();
+                .tags("substrate", "http", "service", "payment", "lane", "canary").gauge();
         assertThat(canary.value()).isEqualTo(1.0);
 
         probe.setLaneActive("canary", false);

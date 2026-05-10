@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/** Tracks HTTP-substrate routability via Service-endpoint addresses. Kafka/Restate lane gauges are out of scope. */
 public class LaneStateProbe implements Closeable {
 
     private static final Logger log = LoggerFactory.getLogger(LaneStateProbe.class);
@@ -51,7 +52,7 @@ public class LaneStateProbe implements Closeable {
     private void registerGauge(String lane) {
         AtomicInteger holder = laneState.computeIfAbsent(lane, l -> new AtomicInteger(0));
         Gauge.builder("canary_lane_active", holder, AtomicInteger::doubleValue)
-                .tags("service", serviceName, "lane", lane)
+                .tags("substrate", "http", "service", serviceName, "lane", lane)
                 .strongReference(true)
                 .register(registry);
     }
