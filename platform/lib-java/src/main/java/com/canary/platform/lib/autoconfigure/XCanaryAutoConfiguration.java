@@ -12,6 +12,9 @@ import com.canary.platform.lib.XCanaryRestateClientCustomizer;
 import com.canary.platform.lib.XServedChainResponseFilter;
 import com.canary.platform.lib.XServedChainRestClientInterceptor;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.common.Metric;
+import org.apache.kafka.common.MetricName;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -19,14 +22,20 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
+import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
+import org.springframework.kafka.listener.ConsumerAwareRebalanceListener;
+import org.springframework.kafka.listener.MessageListenerContainer;
 import org.springframework.web.client.RestClient;
 
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 @AutoConfiguration
 public class XCanaryAutoConfiguration {
@@ -88,8 +97,60 @@ public class XCanaryAutoConfiguration {
 
     @Bean
     public KafkaConsumerHealthIndicator kafkaConsumerHealthIndicator(
-            @Value("${canary.kafka-health-timeout-ms:30000}") long timeoutMs) {
-        return new KafkaConsumerHealthIndicator(timeoutMs);
+            @Value("${canary.kafka-heartbeat-stale-ms:${canary.kafka-health-timeout-ms:15000}}") long heartbeatStaleMs,
+            Supplier<OptionalLong> lastHeartbeatAgeMsSupplier) {
+        return new KafkaConsumerHealthIndicator(heartbeatStaleMs, lastHeartbeatAgeMsSupplier);
+    }
+
+    @Bean
+    public Supplier<OptionalLong> lastHeartbeatAgeMsSupplier(KafkaListenerEndpointRegistry registry) {
+        return () -> {
+            long minAgeMs = Long.MAX_VALUE;
+            for (MessageListenerContainer container : registry.getListenerContainers()) {
+                Map<String, Map<MetricName, ? extends Metric>> metrics = container.metrics();
+                for (Map<MetricName, ? extends Metric> perClient : metrics.values()) {
+                    for (Map.Entry<MetricName, ? extends Metric> entry : perClient.entrySet()) {
+                        if ("last-heartbeat-seconds-ago".equals(entry.getKey().name())) {
+                            Object value = entry.getValue().metricValue();
+                            if (value instanceof Double d && !d.isNaN() && !d.isInfinite() && d >= 0) {
+                                long ageMs = (long) (d * 1000);
+                                if (ageMs < minAgeMs) minAgeMs = ageMs;
+                            }
+                        }
+                    }
+                }
+            }
+            return minAgeMs == Long.MAX_VALUE ? OptionalLong.empty() : OptionalLong.of(minAgeMs);
+        };
+    }
+
+    // Spring Boot 4 / spring-kafka 4.0.4 dropped the
+    // ConsumerPartitionsAssignedEvent / ConsumerPartitionsRevokedEvent
+    // application events. To drive the indicator's lifecycle we set a
+    // ConsumerAwareRebalanceListener on the listener container factory's
+    // ContainerProperties; spring-kafka invokes it directly on the
+    // consumer thread when the broker assigns or revokes partitions.
+    @Bean
+    public ConsumerAwareRebalanceListener kafkaConsumerRebalanceListener(
+            KafkaConsumerHealthIndicator indicator) {
+        return new ConsumerAwareRebalanceListener() {
+            @Override
+            public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
+                if (!partitions.isEmpty()) {
+                    indicator.onPartitionsAssigned();
+                }
+            }
+
+            @Override
+            public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
+                indicator.onPartitionsRevoked();
+            }
+
+            @Override
+            public void onPartitionsLost(Collection<TopicPartition> partitions) {
+                indicator.onPartitionsRevoked();
+            }
+        };
     }
 
     @Bean(destroyMethod = "close")
@@ -139,10 +200,12 @@ public class XCanaryAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(name = "kafkaListenerContainerFactory")
     public ConcurrentKafkaListenerContainerFactory<Object, Object> kafkaListenerContainerFactory(
-            ConsumerFactory<Object, Object> consumerFactory) {
+            ConsumerFactory<Object, Object> consumerFactory,
+            ConsumerAwareRebalanceListener rebalanceListener) {
         ConcurrentKafkaListenerContainerFactory<Object, Object> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
+        factory.getContainerProperties().setConsumerRebalanceListener(rebalanceListener);
         return factory;
     }
 }

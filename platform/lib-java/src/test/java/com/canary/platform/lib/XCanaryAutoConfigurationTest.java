@@ -4,6 +4,9 @@ import com.canary.platform.lib.autoconfigure.XCanaryAutoConfiguration;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.web.client.RestClient;
 
 import java.util.function.Consumer;
@@ -12,7 +15,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class XCanaryAutoConfigurationTest {
 
+    // The autoconfig's lastHeartbeatAgeMsSupplier bean depends on
+    // KafkaListenerEndpointRegistry, which is normally contributed by
+    // @EnableKafka on services that use @KafkaListener. The lib-java
+    // ApplicationContextRunner runs without @EnableKafka, so we register
+    // an empty registry here to satisfy the dependency.
+    @Configuration
+    static class StubKafkaListenerRegistryConfig {
+        @Bean
+        KafkaListenerEndpointRegistry kafkaListenerEndpointRegistry() {
+            return new KafkaListenerEndpointRegistry();
+        }
+    }
+
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
+            .withUserConfiguration(StubKafkaListenerRegistryConfig.class)
             .withConfiguration(AutoConfigurations.of(XCanaryAutoConfiguration.class));
 
     @Test
