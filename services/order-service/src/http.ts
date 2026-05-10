@@ -17,6 +17,8 @@ export interface HttpDeps {
   clients: SagaClients;
   kafkaSend?: (topic: string, key: string, value: string) => Promise<void>;
   kafkaHealth?: KafkaHealthState;
+  /** "stable" | "canary"; defaults to process.env.VERSION ?? "stable". Only canary's /health is gated on Kafka health. */
+  version?: string;
 }
 
 export function buildClient(baseURL: string): AxiosInstance {
@@ -29,11 +31,17 @@ export function buildClient(baseURL: string): AxiosInstance {
 export function setupHttp(deps: HttpDeps): Express {
   const app = express();
   app.use(express.json());
+  const version = deps.version ?? process.env.VERSION ?? "stable";
   app.get("/health", (_req, res) => {
-    const report = deps.kafkaHealth?.report();
-    if (report && !report.ok) {
-      res.status(503).json({ ok: false, kafka: report });
-      return;
+    // Only canary gates readiness on Kafka health. Stable must always
+    // report ok (even with stale Kafka) to avoid the cold-cluster boot
+    // deadlock — see deploy/helm/values/canary-overlay.yaml comment.
+    if (version === "canary") {
+      const report = deps.kafkaHealth?.report();
+      if (report && !report.ok) {
+        res.status(503).json({ ok: false, kafka: report });
+        return;
+      }
     }
     res.json({ ok: true });
   });

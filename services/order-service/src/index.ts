@@ -18,7 +18,12 @@ const kafka = await setupKafka({
   kafkaHealthTimeoutMs: config.KAFKA_HEALTH_TIMEOUT_MS,
 });
 
-const app = setupHttp({ clients, kafkaSend: kafka.send, kafkaHealth: kafka.health });
+const app = setupHttp({
+  clients,
+  kafkaSend: kafka.send,
+  kafkaHealth: kafka.health,
+  version: process.env.VERSION ?? "stable",
+});
 
 const server = app.listen(config.HTTP_PORT, () => {
   console.log(`order-service HTTP listening on ${config.HTTP_PORT}`);

@@ -109,4 +109,37 @@ describe("HTTP routes", () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ ok: true });
   });
+
+  it("GET /health on CANARY returns 503 when kafka health state is stale", async () => {
+    const { createKafkaHealthState } = await import("@canary/lib-node");
+    const staleHealth = createKafkaHealthState(1);
+    staleHealth.recordPoll();
+    await new Promise<void>((r) => setTimeout(r, 10));
+
+    const app = setupHttp({
+      clients: { inventory: mockAxios(null), payment: mockAxios(null), notification: mockAxios(null) },
+      kafkaHealth: staleHealth,
+      version: "canary",
+    });
+    const res = await request(app).get("/health");
+    expect(res.status).toBe(503);
+    expect(res.body.ok).toBe(false);
+  });
+
+  it("GET /health on STABLE returns 200 even when kafkaHealth has never polled (cold start)", async () => {
+    // Reproduces the cold-cluster boot deadlock case: stable must NOT be
+    // gated on Kafka health, so a fresh pod with lastPollMs==0 still
+    // becomes Ready. See deploy/helm/values/canary-overlay.yaml comment.
+    const { createKafkaHealthState } = await import("@canary/lib-node");
+    const coldHealth = createKafkaHealthState(30000);
+    expect(coldHealth.report().ok).toBe(false);
+
+    const app = setupHttp({
+      clients: { inventory: mockAxios(null), payment: mockAxios(null), notification: mockAxios(null) },
+      kafkaHealth: coldHealth,
+      version: "stable",
+    });
+    const res = await request(app).get("/health");
+    expect(res.status).toBe(200);
+  });
 });

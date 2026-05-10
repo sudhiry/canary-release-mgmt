@@ -69,15 +69,39 @@ describe("HTTP routes", () => {
     expect(res.body).toEqual([{ id: "n_1", userId: "u_42", message: "hi", status: "sent" }]);
   });
 
-  it("GET /health returns 503 when kafka health state is stale", async () => {
-    // Create a health state with 1ms timeout, record a poll, then let it go stale.
+  it("GET /health on CANARY returns 503 when kafka health state is stale", async () => {
     const staleHealth = createKafkaHealthState(1);
     staleHealth.recordPoll();
     await new Promise<void>((r) => setTimeout(r, 10));
 
-    const app = setupHttp({ ingressClient: mockAxios(), kafkaHealth: staleHealth });
+    const app = setupHttp({ ingressClient: mockAxios(), kafkaHealth: staleHealth, version: "canary" });
     const res = await request(app).get("/health");
     expect(res.status).toBe(503);
     expect(res.body.ok).toBe(false);
+  });
+
+  it("GET /health on STABLE returns 200 even when kafka health state is stale", async () => {
+    // Stable must NOT be gated on Kafka health — see canary-overlay.yaml comment.
+    // Cold-cluster boot deadlock: lastPollMs==0 → forever 503 if gated.
+    const staleHealth = createKafkaHealthState(1);
+    staleHealth.recordPoll();
+    await new Promise<void>((r) => setTimeout(r, 10));
+
+    const app = setupHttp({ ingressClient: mockAxios(), kafkaHealth: staleHealth, version: "stable" });
+    const res = await request(app).get("/health");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+  });
+
+  it("GET /health on STABLE returns 200 even when kafkaHealth has never polled (cold start)", async () => {
+    // Specifically reproduces the cold-cluster boot deadlock case:
+    // a fresh KafkaHealthState that has never recorded a poll reports
+    // ok=false. Stable must still report 200 so it can become Ready and
+    // accept traffic that will eventually trigger a poll.
+    const coldHealth = createKafkaHealthState(30000);
+    expect(coldHealth.report().ok).toBe(false);
+    const app = setupHttp({ ingressClient: mockAxios(), kafkaHealth: coldHealth, version: "stable" });
+    const res = await request(app).get("/health");
+    expect(res.status).toBe(200);
   });
 });

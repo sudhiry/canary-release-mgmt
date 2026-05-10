@@ -30,4 +30,10 @@ management:
       show-details: never
       group:
         readiness:
-          include: readinessState,kafkaConsumer
+          # Stable pods: only readinessState. Canary pods: overridden via
+          # MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE in canary-overlay
+          # to also include kafkaConsumer — that gating is what lets stable's
+          # pod-watch take over flagged events when canary's consumer dies.
+          # Stable does NOT need it (and gating stable on it caused the cold-
+          # cluster boot deadlock: lastPollMs==0 → readiness 503 forever).
+          include: readinessState
