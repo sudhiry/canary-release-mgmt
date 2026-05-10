@@ -7,6 +7,9 @@ vertx = "4.5.24"
 junit = "6.0.3"
 mockito = "5.14.2"
 assertj = "3.26.3"
+micrometerTracing = "1.5.4"
+opentelemetry = "1.51.0"
+opentelemetryInstrumentation = "2.21.1"
 
 [libraries]
 spring-boot-starter-web        = { module = "org.springframework.boot:spring-boot-starter-web" }
@@ -23,6 +26,9 @@ junit-jupiter                  = { module = "org.junit.jupiter:junit-jupiter", v
 junit-platform-launcher        = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junit" }
 mockito-core                   = { module = "org.mockito:mockito-core", version.ref = "mockito" }
 assertj-core                   = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+micrometer-tracing-bridge-otel = { module = "io.micrometer:micrometer-tracing-bridge-otel", version.ref = "micrometerTracing" }
+opentelemetry-exporter-otlp    = { module = "io.opentelemetry:opentelemetry-exporter-otlp", version.ref = "opentelemetry" }
+opentelemetry-spring-boot-starter = { module = "io.opentelemetry.instrumentation:opentelemetry-spring-boot-starter", version.ref = "opentelemetryInstrumentation" }
 
 [plugins]
 spring-boot                    = { id = "org.springframework.boot",                  version.ref = "springBoot" }
