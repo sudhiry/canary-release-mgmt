@@ -1,7 +1,9 @@
 package com.canary.platform.lib;
 
 import com.canary.platform.lib.autoconfigure.XCanaryAutoConfiguration;
+import com.canary.platform.lib.observability.CanaryKafkaRecordInterceptor;
 import com.canary.platform.lib.observability.CanaryMetrics;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -37,6 +39,11 @@ class XCanaryAutoConfigurationTest {
         @Bean
         CanaryMetrics canaryMetrics() {
             return new CanaryMetrics(new SimpleMeterRegistry(), "test");
+        }
+
+        @Bean
+        CanaryKafkaRecordInterceptor<Object, Object> canaryKafkaRecordInterceptor(CanaryMetrics canaryMetrics) {
+            return new CanaryKafkaRecordInterceptor<>(canaryMetrics);
         }
     }
 
@@ -115,6 +122,22 @@ class XCanaryAutoConfigurationTest {
                 "canary.kafka-health-timeout-ms=7777"
             ).run(ctx -> {
                 assertThat(ctx).hasSingleBean(KafkaConsumerHealthIndicator.class);
+            });
+    }
+
+    @Test
+    void kafkaListenerContainerFactoryHasCanaryRecordInterceptor() {
+        runner
+            .withBean(MeterRegistry.class, SimpleMeterRegistry::new)
+            .withPropertyValues("canary.service-name=payment", "canary.presence-watcher.enabled=false")
+            .run(ctx -> {
+                ConcurrentKafkaListenerContainerFactory<?, ?> factory = ctx.getBean(
+                        "kafkaListenerContainerFactory",
+                        ConcurrentKafkaListenerContainerFactory.class);
+                assertThat(factory.getContainerProperties()).isNotNull();
+                // Reflection check that the interceptor field is non-null
+                // (factory exposes it via getRecordInterceptor() in spring-kafka 4.x)
+                assertThat(factory.getRecordInterceptor()).isInstanceOf(CanaryKafkaRecordInterceptor.class);
             });
     }
 }

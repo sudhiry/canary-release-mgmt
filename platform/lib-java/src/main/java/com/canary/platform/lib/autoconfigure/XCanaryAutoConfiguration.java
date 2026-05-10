@@ -11,6 +11,7 @@ import com.canary.platform.lib.XCanaryRestClientInterceptor;
 import com.canary.platform.lib.XCanaryRestateClientCustomizer;
 import com.canary.platform.lib.XServedChainResponseFilter;
 import com.canary.platform.lib.XServedChainRestClientInterceptor;
+import com.canary.platform.lib.observability.CanaryKafkaRecordInterceptor;
 import com.canary.platform.lib.observability.CanaryMetrics;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.Metric;
@@ -222,11 +223,13 @@ public class XCanaryAutoConfiguration {
     @ConditionalOnMissingBean(name = "kafkaListenerContainerFactory")
     public ConcurrentKafkaListenerContainerFactory<Object, Object> kafkaListenerContainerFactory(
             ConsumerFactory<Object, Object> consumerFactory,
-            ConsumerAwareRebalanceListener rebalanceListener) {
+            ConsumerAwareRebalanceListener rebalanceListener,
+            CanaryKafkaRecordInterceptor<Object, Object> recordInterceptor) {
         ConcurrentKafkaListenerContainerFactory<Object, Object> factory =
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.getContainerProperties().setConsumerRebalanceListener(rebalanceListener);
+        factory.setRecordInterceptor(recordInterceptor);
         return factory;
     }
 }
