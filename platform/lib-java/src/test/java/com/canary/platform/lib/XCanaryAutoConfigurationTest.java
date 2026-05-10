@@ -1,6 +1,8 @@
 package com.canary.platform.lib;
 
 import com.canary.platform.lib.autoconfigure.XCanaryAutoConfiguration;
+import com.canary.platform.lib.observability.CanaryMetrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -22,11 +24,19 @@ class XCanaryAutoConfigurationTest {
     // @EnableKafka on services that use @KafkaListener. The lib-java
     // ApplicationContextRunner runs without @EnableKafka, so we register
     // an empty registry here to satisfy the dependency.
+    // A stub CanaryMetrics is also provided so the xCanaryRequestFilter bean
+    // (which now requires CanaryMetrics) can be created. The real CanaryMetrics
+    // bean will be wired by the autoconfig in Task 11.
     @Configuration
     static class StubKafkaListenerRegistryConfig {
         @Bean
         KafkaListenerEndpointRegistry kafkaListenerEndpointRegistry() {
             return new KafkaListenerEndpointRegistry();
+        }
+
+        @Bean
+        CanaryMetrics canaryMetrics() {
+            return new CanaryMetrics(new SimpleMeterRegistry(), "test");
         }
     }
 

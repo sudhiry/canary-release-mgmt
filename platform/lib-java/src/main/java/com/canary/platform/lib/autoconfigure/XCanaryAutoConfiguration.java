@@ -11,6 +11,7 @@ import com.canary.platform.lib.XCanaryRestClientInterceptor;
 import com.canary.platform.lib.XCanaryRestateClientCustomizer;
 import com.canary.platform.lib.XServedChainResponseFilter;
 import com.canary.platform.lib.XServedChainRestClientInterceptor;
+import com.canary.platform.lib.observability.CanaryMetrics;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.Metric;
 import org.apache.kafka.common.MetricName;
@@ -41,8 +42,8 @@ import java.util.function.Supplier;
 public class XCanaryAutoConfiguration {
 
     @Bean
-    public XCanaryRequestFilter xCanaryRequestFilter() {
-        return new XCanaryRequestFilter();
+    public XCanaryRequestFilter xCanaryRequestFilter(CanaryMetrics canaryMetrics) {
+        return new XCanaryRequestFilter(canaryMetrics);
     }
 
     @Bean
