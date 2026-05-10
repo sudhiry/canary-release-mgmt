@@ -68,38 +68,27 @@ function runMake(target: string, timeoutMs: number): Promise<void> {
       // install --wait completes — the headline assertion of K6.
       await deployCanary("audit-service", "dev");
 
-      // Step D: confirm canary readiness is 200 within 30s of pod creation.
-      // audit-service exposes its actuator on server.port 8083 (see
-      // services/audit-service/src/main/resources/application.yml).
+      // Step D: confirm canary pod reaches Ready within 30s. Use kubectl wait
+      // (the kubelet-evaluated condition reflects the actuator readiness probe
+      // result) — avoids assuming the Java service image ships curl.
       const canaryPod = await findPodByLabel("services", "app=audit-service,version=canary");
-      const start = Date.now();
-      let ready = false;
-      let lastCode = "";
-      while (Date.now() - start < 30_000) {
-        const probe = await execFileAsync(
-          "kubectl",
-          [
-            "-n", "services",
-            "exec", canaryPod, "--",
-            "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-            "localhost:8083/actuator/health/readiness",
-          ],
-          { encoding: "utf8" },
-        ).catch((err: NodeJS.ErrnoException & { stdout?: string }) => ({
-          stdout: err.stdout ?? "",
-          stderr: "",
-        }));
-        lastCode = probe.stdout.trim();
-        if (lastCode === "200") {
-          ready = true;
-          break;
-        }
-        await new Promise((r) => setTimeout(r, 2_000));
-      }
+      const probe = await execFileAsync(
+        "kubectl",
+        [
+          "-n", "services",
+          "wait", `pod/${canaryPod}`,
+          "--for=condition=ready",
+          "--timeout=30s",
+        ],
+        { encoding: "utf8" },
+      ).catch((err: NodeJS.ErrnoException & { stdout?: string; stderr?: string }) => ({
+        stdout: err.stdout ?? "",
+        stderr: err.stderr ?? String(err),
+      }));
       expect(
-        ready,
-        `canary readiness never returned 200 within 30s; last code observed: ${lastCode || "<empty>"}`,
-      ).toBe(true);
+        probe.stdout.trim(),
+        `canary pod never reached Ready within 30s; stderr: ${("stderr" in probe ? probe.stderr : "") || "<empty>"}`,
+      ).toMatch(/condition met/);
     }, 600_000);
   },
 );
