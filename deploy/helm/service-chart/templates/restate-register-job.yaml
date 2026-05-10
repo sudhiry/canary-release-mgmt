@@ -28,7 +28,7 @@ spec:
             - -c
             - |
               set -eu
-              SVC="{{ .Values.serviceName }}.{{ .Release.Namespace }}.svc.cluster.local"
+              SVC="{{ .Values.serviceName }}-{{ .Values.version | default "stable" }}.{{ .Release.Namespace }}.svc.cluster.local"
               RESTATE_PORT="{{ .Values.ports.restateHandler }}"
               ADMIN="{{ .Values.env.RESTATE_ADMIN_URL }}"
               BODY="{\"uri\":\"http://${SVC}:${RESTATE_PORT}\",\"force\":true}"

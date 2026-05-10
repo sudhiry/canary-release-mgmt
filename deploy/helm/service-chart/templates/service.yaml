@@ -1,4 +1,7 @@
-{{- if eq (.Values.version | default "stable") "stable" -}}
+{{- $version := .Values.version | default "stable" -}}
+{{- if eq $version "stable" }}
+# Shared Service — used by Istio VirtualService/DestinationRule for HTTP routing.
+# Only rendered on the stable release; canary release skips this block.
 apiVersion: v1
 kind: Service
 metadata:
@@ -18,3 +21,26 @@ spec:
       port: {{ .Values.ports.restateHandler }}
       targetPort: restate
 {{- end }}
+---
+# Per-subset Service — used by Restate to dispatch to one variant only.
+# Rendered on every release (stable AND canary), one per variant.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.serviceName }}-{{ $version }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Values.serviceName }}
+    version: {{ $version }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ .Values.serviceName }}
+    version: {{ $version }}
+  ports:
+    - name: http
+      port: {{ .Values.ports.http }}
+      targetPort: http
+    - name: restate
+      port: {{ .Values.ports.restateHandler }}
+      targetPort: restate
