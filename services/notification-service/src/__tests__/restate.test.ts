@@ -44,7 +44,7 @@ describe("setupRestate gating", () => {
 
 describe("NotificationService.notify handler", () => {
   beforeEach(() => {
-    (notificationStore as unknown as { byId: Map<string, unknown> }).byId.clear();
+    notificationStore.byId.clear();
   });
 
   afterEach(() => {
@@ -52,7 +52,7 @@ describe("NotificationService.notify handler", () => {
     configureKafkaSend(null as unknown as KafkaSend);
   });
 
-  it("writes Notification to store and calls AuditQueryService.append", async () => {
+  it("writes notification to store and calls AuditQueryService.append", async () => {
     const auditAppend = vi.fn().mockResolvedValue(undefined);
     // ctx.request().headers is a ReadonlyMap<string, string> in SDK 1.14.
     const ctx = {
@@ -65,7 +65,7 @@ describe("NotificationService.notify handler", () => {
       { userId: "u_1", message: "hi", orderId: "ord_1" },
     ));
 
-    expect(result.status).toBe("sent");
+    expect(result.delivered).toBe(true);
     expect(notificationStore.byUserId("u_1")).toHaveLength(1);
 
     expect(auditAppend).toHaveBeenCalledOnce();
@@ -106,10 +106,11 @@ describe("NotificationService.notify handler", () => {
       { userId: "u_1", message: "hi", orderId: "ord_1" },
     );
 
+    // Kafka payload contains the deliveredMessage
     expect(kafkaSendMock).toHaveBeenCalledWith(
       "notifications.events",
-      result.id,
-      expect.stringContaining(result.id),
+      expect.any(String),
+      expect.stringContaining(result.deliveredMessage),
     );
   });
 
@@ -124,5 +125,64 @@ describe("NotificationService.notify handler", () => {
         { userId: "reject-me", message: "x", orderId: "o_1" },
       ),
     ).rejects.toThrow(/rejected for test driver/);
+  });
+});
+
+describe("notification handler variant binding", () => {
+  let originalVersion: string | undefined;
+  beforeEach(() => {
+    originalVersion = process.env.VERSION;
+    vi.resetModules();
+  });
+  afterEach(() => {
+    if (originalVersion === undefined) delete process.env.VERSION;
+    else process.env.VERSION = originalVersion;
+    vi.resetModules();
+  });
+
+  it("appends canary suffix when VERSION=canary", async () => {
+    process.env.VERSION = "canary";
+    vi.resetModules();
+    const mod = await import("../restate.js");
+    const auditAppend = vi.fn().mockResolvedValue(undefined);
+    const ctx = {
+      request: () => ({ headers: new Map<string, string>() }),
+      serviceClient: vi.fn().mockReturnValue({ append: auditAppend }),
+    };
+    const result = await mod.notifyHandler(ctx as any, {
+      userId: "u1", message: "Order x", orderId: "o1",
+    });
+    expect(result.deliveredMessage).toBe("Order x [via canary notifier]");
+    expect(result.version).toBe("canary");
+  });
+
+  it("emits unmodified message when VERSION is not set", async () => {
+    delete process.env.VERSION;
+    vi.resetModules();
+    const mod = await import("../restate.js");
+    const auditAppend = vi.fn().mockResolvedValue(undefined);
+    const ctx = {
+      request: () => ({ headers: new Map<string, string>() }),
+      serviceClient: vi.fn().mockReturnValue({ append: auditAppend }),
+    };
+    const result = await mod.notifyHandler(ctx as any, {
+      userId: "u1", message: "Order x", orderId: "o1",
+    });
+    expect(result.deliveredMessage).toBe("Order x");
+    expect(result.version).toBe("stable");
+  });
+
+  it("preserves Phase 3.a TerminalError on reject-me", async () => {
+    delete process.env.VERSION;
+    vi.resetModules();
+    const restate = await import("@restatedev/restate-sdk");
+    const mod = await import("../restate.js");
+    const ctx = {
+      request: () => ({ headers: new Map<string, string>() }),
+      serviceClient: vi.fn(() => ({ append: vi.fn() })),
+    };
+    await expect(mod.notifyHandler(ctx as any, {
+      userId: "reject-me", message: "x", orderId: "o1",
+    })).rejects.toBeInstanceOf(restate.TerminalError);
   });
 });

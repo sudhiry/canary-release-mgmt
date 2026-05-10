@@ -1,4 +1,10 @@
-import type { Notification } from "@canary/restate-defs-node";
+// Local shape replacing the removed Notification interface from restate-defs-node.
+export interface StoredNotification {
+  id: string;
+  userId: string;
+  message: string;
+  status: string;
+}
 
 export interface ConsumedEvent {
   topic: string;
@@ -8,17 +14,17 @@ export interface ConsumedEvent {
 }
 
 class NotificationStore {
-  private byId = new Map<string, Notification>();
+  public byId = new Map<string, StoredNotification>();
 
-  put(n: Notification): void {
+  put(n: StoredNotification): void {
     this.byId.set(n.id, n);
   }
 
-  byUserId(userId: string): Notification[] {
+  byUserId(userId: string): StoredNotification[] {
     return Array.from(this.byId.values()).filter((n) => n.userId === userId);
   }
 
-  all(): Notification[] {
+  all(): StoredNotification[] {
     return Array.from(this.byId.values());
   }
 }
