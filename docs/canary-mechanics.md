@@ -272,6 +272,36 @@ by watch events. The consume-filter reads this flag on every message.
    flips `canaryReady = false`.
 7. Stable processes the next flagged message that arrives → graceful fallback.
 
+As a sequence diagram:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant CC as canary's<br/>Kafka consumer
+    participant Health as canary's<br/>/health/readiness
+    participant Kubelet
+    participant ES as EndpointSlice<br/>controller
+    participant Watcher as stable's<br/>XCanaryPresenceWatcher
+    participant SL as stable's<br/>Kafka listener
+    participant Topic as Kafka topic
+
+    rect rgba(255,200,200,0.15)
+        note over CC: SIGSTOP / GC / network blip
+        CC--xCC: heartbeat thread frozen
+    end
+    note over CC: last-heartbeat-seconds-ago > 15s
+
+    Kubelet->>Health: GET /health/readiness
+    Health-->>Kubelet: 503 (kafkaConsumer: OUT_OF_SERVICE)
+    Kubelet->>ES: pod Ready=False
+    ES->>Watcher: watch event MODIFIED<br/>(canary pod Ready=False)
+    Watcher->>Watcher: canaryReady = false<br/>(atomic)
+
+    Topic->>SL: deliver flagged record<br/>(x-canary=true)
+    SL->>SL: shouldProcess()<br/>own=stable, header=true,<br/>canaryReady=false → TRUE
+    SL->>SL: process (graceful fallback)
+```
+
 ### Why stable's `/health` is NOT Kafka-gated
 
 This was a hard-won lesson during cluster verification of Phase 2.b. The
