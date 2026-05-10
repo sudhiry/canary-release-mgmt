@@ -330,6 +330,79 @@ kubectl auth can-i watch pods -n services \
 # expected: yes
 ```
 
+## Restate path
+
+Restate provides the saga's durability (Phase 3.a) and the
+variant-isolated handler dispatch (Phase 3.b β routing). The two
+shipping invariants:
+
+1. **Distinct service names per subset.** Stable pods register
+   `CheckoutSagaStable`, `ReservationWorkflowStable`,
+   `PaymentVOStable`, `NotificationServiceStable`. Canary pods
+   register the same handlers under `*Canary` names. Per-subset K8s
+   Services (`<svc>-stable` / `<svc>-canary`) give Restate
+   variant-isolated URLs to register against, since Restate's pods sit
+   outside the Istio mesh and cannot use DestinationRule subsetting.
+2. **Variant chosen at invocation time by header.** The order-service
+   HTTP controller reads `x-canary` on the incoming request and
+   POSTs to either `/CheckoutSagaStable/{id}/run` or
+   `/CheckoutSagaCanary/{id}/run`. Saga handlers do the same when
+   calling other Restate services.
+
+### Sequence: registration + variant dispatch
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Stable as payment-service-stable
+    participant Canary as payment-service-canary
+    participant Admin as Restate Admin<br/>:9070
+    participant Saga as CheckoutSaga handler<br/>(any order-service pod)
+    participant Ingress as Restate Ingress
+
+    rect rgba(200,220,255,0.2)
+        note over Stable,Admin: Startup — handler registration
+        Stable->>Admin: POST /deployments<br/>uri: payment-service-stable.services:9081
+        Admin->>Stable: GET /discover
+        Stable-->>Admin: services: [PaymentVOStable]
+        Canary->>Admin: POST /deployments<br/>uri: payment-service-canary.services:9081
+        Admin->>Canary: GET /discover
+        Canary-->>Admin: services: [PaymentVOCanary]
+    end
+
+    rect rgba(255,230,200,0.25)
+        note over Saga,Ingress: At saga runtime
+        Saga->>Saga: read x-canary header → pick variant
+        Saga->>Ingress: POST /PaymentVOCanary/{key}/charge
+        Ingress->>Ingress: lookup service-name → deployment URL
+        Ingress->>Canary: invoke at<br/>payment-service-canary.services:9081
+        Canary-->>Ingress: result
+        Ingress-->>Saga: result
+    end
+```
+
+Variant isolation is enforced by three independent layers
+(registration under distinct names, in-saga client construction
+picking `*Stable` vs `*Canary`, K8s endpoint selection via per-subset
+Services). A `*Canary` invocation **cannot** reach a stable handler —
+this is the load-bearing β invariant.
+
+### Asymmetry: no automatic stable-takes-over fallback
+
+Phase 2's Kafka path implements graceful fallback ("if `x-canary=true`
+AND canary pod NOT deployed, stable processes") via the
+`XCanaryPresenceWatcher` + per-message filter. **Phase 3.b does not
+replicate this.** The order-service HTTP controller routes by header
+alone; when canary is unhealthy, flagged requests still POST to
+`/CheckoutSagaCanary/...` and Restate either 404s or retries the dead
+URL until an operator intervenes. Failure surfaces as HTTP 502/503 —
+observable to the client (unlike Phase 2's Kafka black-hole risk that
+made fallback essential).
+
+For the full operational runbook (graceful vs emergency canary
+teardown, Restate CLI commands), see the Phase 3.b spec at
+[`docs/superpowers/specs/2026-05-11-canary-release-phase-3-b-canary-handler-versioning-design.md`](superpowers/specs/2026-05-11-canary-release-phase-3-b-canary-handler-versioning-design.md).
+
 ## The `canary-ctl` lifecycle
 
 `canary-ctl` is the per-service orchestrator: Helm release + VirtualService
