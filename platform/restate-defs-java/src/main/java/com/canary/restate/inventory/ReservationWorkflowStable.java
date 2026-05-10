@@ -1,6 +1,7 @@
 package com.canary.restate.inventory;
 
 import dev.restate.sdk.annotation.Handler;
+import dev.restate.sdk.annotation.Name;
 import dev.restate.sdk.annotation.Shared;
 import dev.restate.sdk.annotation.Workflow;
 
@@ -12,7 +13,8 @@ import dev.restate.sdk.annotation.Workflow;
  * <p>Lifecycle is identical to the canary variant; only the registered service
  * name differs. Implementations delegate to {@code ReservationWorkflowCore}.
  */
-@Workflow(name = "ReservationWorkflowStable")
+@Workflow
+@Name("ReservationWorkflowStable")
 public abstract class ReservationWorkflowStable {
     @Handler
     public abstract Reservation run(ReservationRequest req);
