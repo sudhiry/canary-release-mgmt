@@ -58,10 +58,14 @@ class AuditKafkaListenerGatingTest {
             AuditKafkaListener listener = ctx.getBean(AuditKafkaListener.class);
             ConsumedEventStore store = ctx.getBean(ConsumedEventStore.class);
             AtomicBoolean shouldProcess = ctx.getBean("shouldProcessFlag", AtomicBoolean.class);
+            AtomicBoolean polled = ctx.getBean("pollFlag", AtomicBoolean.class);
             shouldProcess.set(false);
+            polled.set(false);
             int before = store.all().size();
             listener.onMessage(record("orders.events", "k", "v", true));
             assertThat(store.all().size()).isEqualTo(before);
+            // recordPoll fired BEFORE filter rejected (ordering invariant for readiness gating)
+            assertThat(polled.get()).isTrue();
         });
     }
 
