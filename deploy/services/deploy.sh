@@ -38,7 +38,3 @@ echo "==> 6. Apply edge ingress (Gateway + edge VirtualService)"
 kubectl apply -f "${REPO_ROOT}/deploy/routing/ingress/"
 
 echo "==> deploy-services complete"
-echo
-echo "    Note: on a freshly-deployed cluster, run 'make pre-warm' before any"
-echo "    'make canary-deploy' to avoid the cold-cluster readiness deadlock"
-echo "    (canary pods need at least one delivered Kafka message to flip Ready)."
