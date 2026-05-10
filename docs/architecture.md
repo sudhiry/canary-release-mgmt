@@ -44,6 +44,44 @@ when canary becomes unhealthy.
    on startup; saga orchestration lands here in Phase 3.
 ```
 
+Rendered version (GitHub):
+
+```mermaid
+graph LR
+    Client["Test client<br/>(traffic-cli)"]
+    Gateway["Istio Gateway<br/>localhost:8080"]
+
+    subgraph services_ns["namespace: services"]
+        Order["order-service<br/>TS+Node, :3001"]
+        Inventory["inventory-service<br/>Java, :8082"]
+        Payment["payment-service<br/>Java, :8081"]
+        Notification["notification-service<br/>TS+Node, :3002"]
+        Audit["audit-service<br/>Java, :8083"]
+    end
+
+    subgraph kafka_ns["namespace: kafka"]
+        Kafka[("Kafka<br/>5 topics: *.events")]
+    end
+
+    subgraph restate_ns["namespace: restate"]
+        Restate[("Restate server<br/>:9070 admin")]
+    end
+
+    Client -- "POST /api/orders<br/>x-canary: true|false" --> Gateway
+    Gateway -- "HTTP" --> Order
+    Order -- "POST /CheckoutSaga*/run" --> Restate
+    Restate -. "dispatch handler" .-> Order
+    Order -- "axios HTTP" --> Inventory
+    Order -- "axios HTTP" --> Payment
+    Order -- "axios HTTP" --> Notification
+    Order -- "orders.events" --> Kafka
+    Payment -- "payments.events" --> Kafka
+    Inventory -- "inventory.events" --> Kafka
+    Notification -- "notifications.events" --> Kafka
+    Kafka -- "consume all *.events" --> Audit
+    Audit -- "audit.events" --> Kafka
+```
+
 ## Substrates (Phase 1.1)
 
 | Component | Version | Where it runs | How to reach |
