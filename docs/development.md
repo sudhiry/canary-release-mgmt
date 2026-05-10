@@ -121,7 +121,7 @@ Key knobs every service honors:
 | `KAFKA_PRODUCER_ENABLED` | `true` | Gates the producer wiring |
 | `KAFKA_HEARTBEAT_STALE_MS` (Node) / `canary.kafka-heartbeat-stale-ms` (Java) | `15000` | After this many ms with no consumer heartbeat, the health indicator goes OUT_OF_SERVICE. Old `*-health-timeout-ms` names accepted as deprecated aliases. |
 | `MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE` | `readinessState` (stable); `readinessState,kafkaConsumer` (canary, via overlay) | Spring Actuator readiness group composition. The `kafkaConsumer` gate is canary-only by design — only canary needs the takeover signal; stable doesn't, and re-gating it would convert Kafka outages into full-service outages. |
-| `RESTATE_REGISTER_HANDLERS` | `true` (stable); `false` (canary) | Only stable owns the Restate handler registry |
+| `RESTATE_REGISTER_HANDLERS` | `true` for both stable and canary (since Phase 3.b) | Gates the in-pod Restate endpoint listener. Both subsets register handlers under variant-suffixed service names (`*Stable` / `*Canary`). Set `false` only for local-dev runs without a Restate server. |
 | `RESTATE_INGRESS_URL` | `http://localhost:9070` (cluster: `http://restate.restate:9070`) | Restate admin |
 | `POD_NAMESPACE` | `services` | Where the presence watcher looks for canary pods |
 | `SERVICE_NAME` | (per service) | Stamped into `x-served-chain` and used by the presence watcher selector |
