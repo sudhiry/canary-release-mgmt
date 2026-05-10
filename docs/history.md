@@ -224,6 +224,16 @@ After Items 4 + 5, `make deploy-services` succeeds on a cold cluster,
 all 6 expected consumer groups appear in `kafka-consumer-groups.sh
 --list`, and pre-warm orders show lag=0 on every Java + Node consumer.
 
+- **Item 6 — Cold-cluster pre-warm fixed at root cause.** Item 1's
+  `make pre-warm` was a workaround. Replaced the "first poll received"
+  Kafka readiness signal with "consumer joined + heartbeat fresh"
+  (Java: `last-heartbeat-seconds-ago` metric; Node: kafkajs
+  `consumer.events.HEARTBEAT`). Threshold default 15s (was 30s for the
+  poll-receipt timeout). K5 detection is now ~31s end-to-end (was ~46s).
+  `make pre-warm` is kept as an optional e2e helper. Stable readiness
+  unchanged. Old env-var/property names accepted as deprecated aliases.
+  Spec: `docs/superpowers/specs/2026-05-10-canary-cold-cluster-prewarm-fix-design.md`.
+
 #### Open finding (deferred): K1 e2e saga timeout
 
 With Items 1–5 in place, K1's `beforeAll` (5 sequential canary deploys)

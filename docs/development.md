@@ -62,7 +62,7 @@ sheet:
 | `make build-services` | Compile all 5 service binaries (Java bootJars + Node `tsc dist`) |
 | `make build-images` / `make load-images` / `make images` | Docker build + kind load |
 | `make deploy-services` | KafkaTopics + Helm install all 5 + Istio routing |
-| `make pre-warm` | Send 3 baseline orders (REQUIRED before first canary on a cold cluster) |
+| `make pre-warm` | Send 3 baseline orders (optional; useful before e2e suites that measure consumer lag) |
 | `make smoke-services` | bats deploy smoke |
 | `make canary-deploy SVC=<s> TAG=<t>` | Deploy a canary via canary-ctl |
 | `make canary-rollback SVC=<s>` | Roll a canary back |
@@ -119,7 +119,7 @@ Key knobs every service honors:
 | `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` (cluster: `my-cluster-kafka-bootstrap.kafka:9092`) | Kafka brokers |
 | `KAFKA_CONSUMERS_ENABLED` | `true` | Gates `@KafkaListener` (Java) / `consumer.subscribe` (Node) |
 | `KAFKA_PRODUCER_ENABLED` | `true` | Gates the producer wiring |
-| `KAFKA_HEALTH_TIMEOUT_MS` (Node) / `canary.kafka-health-timeout-ms` (Java) | `30000` | After this many ms with no successful poll, the health indicator goes OUT_OF_SERVICE |
+| `KAFKA_HEARTBEAT_STALE_MS` (Node) / `canary.kafka-heartbeat-stale-ms` (Java) | `15000` | After this many ms with no consumer heartbeat, the health indicator goes OUT_OF_SERVICE. Old `*-health-timeout-ms` names accepted as deprecated aliases. |
 | `MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE` | `readinessState` (stable); `readinessState,kafkaConsumer` (canary, via overlay) | Spring Actuator readiness group composition. Crucial: stable must NOT include `kafkaConsumer` or fresh deploys deadlock. |
 | `RESTATE_REGISTER_HANDLERS` | `true` (stable); `false` (canary) | Only stable owns the Restate handler registry |
 | `RESTATE_INGRESS_URL` | `http://localhost:9070` (cluster: `http://restate.restate:9070`) | Restate admin |
@@ -181,12 +181,18 @@ If you change the Java listener wiring, three traps are worth knowing:
 2. **`ConsumerFactory` and `kafkaListenerContainerFactory` beans are
    provided by `XCanaryAutoConfiguration`.** Spring Boot 4.0.4 stopped
    auto-creating both. We construct them with `auto.offset.reset=earliest`
-   so a brand-new `<svc>-canary` consumer group can pick up the pre-warm
-   trail (a freshly-joined group with `latest` would miss everything
-   produced before it joined → no `recordPoll` → 503 forever).
+   so a brand-new `<svc>-canary` consumer group can pick up any traffic
+   produced before it joined.
 3. **Stable's readiness group must NOT include `kafkaConsumer`.** See
-   `application.yml` and `canary-overlay.yaml`. Adding it to stable
-   reintroduces the cold-cluster boot deadlock.
+   `application.yml` and `canary-overlay.yaml`. Stable doesn't need a
+   Kafka takeover signal — only canary does — and keeping the gate
+   canary-only avoids any cold-cluster surprise on stable.
+
+Canary readiness uses consumer heartbeat freshness
+(`last-heartbeat-seconds-ago` metric), not message receipt. A brand-new
+canary pod becomes Ready as soon as its consumer joins the group and
+emits a heartbeat — typically <5s after pod start, even on a cluster
+with zero traffic.
 
 These three rules are interlocking — if you change the Java Kafka wiring
 or the readiness configuration, run `make smoke-canary` AND eyeball
