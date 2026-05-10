@@ -30,6 +30,9 @@ export async function notifyHandler(ctx: restate.Context, req: NotifyRequest): P
   const isCanary = ctx.request().headers.get("x-canary") === "true";
 
   return runWithCanary(isCanary, async () => {
+    if (req.userId === "reject-me") {
+      throw new restate.TerminalError("notify rejected for test driver");
+    }
     const notification: Notification = {
       id: randomUUID(),
       userId: req.userId,
