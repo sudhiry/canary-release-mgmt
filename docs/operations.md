@@ -301,6 +301,23 @@ independent layers (registration, in-saga client construction, K8s
 endpoint selection) — a `*Canary` invocation cannot reach a stable
 handler.
 
+**No automatic stable-takes-over fallback (asymmetry with Phase 2).**
+Phase 2's Kafka path implements rule #2 — "if `x-canary=true` AND canary
+pod NOT deployed, stable processes" — via a K8s pod-watch
+(`canaryReady` boolean) plus a per-message filter on stable's
+`@KafkaListener`. Phase 3.b does **not** replicate this. The
+order-service HTTP controller routes by `x-canary` header alone; when
+canary is unhealthy, flagged requests still POST to
+`/CheckoutSagaCanary/...` and Restate either 404s or retries the dead
+URL until the operator intervenes. Failure surfaces as HTTP 502/503 —
+observable to the client (unlike Phase 2's Kafka black-hole risk that
+made fallback essential). Operational mitigation: standard pod
+readiness alarms + stop flagged traffic at the Istio VirtualService
+during canary outages. If automatic fallback is needed in a production
+fork, extend Phase 2's `presenceWatcher` in order-service to publish a
+`canaryReady` boolean and have the controller fall through to `*Stable`
+when canary is unhealthy.
+
 **Trade-off — Restate's pause-resume recovery is unavailable in β.**
 Restate's [versioning docs](https://docs.restate.dev/services/versioning)
 recommend `restate invocations pause <id>` followed by

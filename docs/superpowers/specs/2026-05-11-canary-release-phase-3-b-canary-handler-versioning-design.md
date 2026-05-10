@@ -341,6 +341,7 @@ Each compensation goes to the matching-variant downstream automatically — clie
 | F4  | Variant-mismatch within saga (refactor regression)      | `saga-variant-binding.test.ts` static check on bound def names per VERSION env.                                         |
 | F5  | Pod label / VERSION env mismatch (config drift)         | Spring + Node startup self-check: assert `process.env.VERSION` (or `app.version`) matches expected variant; fail fast.  |
 | F6  | Controller routes flagged request to wrong variant URL  | `http.test.ts` unit test + R1-R6 e2e auditTrail assertions.                                                             |
+| F7  | Canary unavailable during traffic — no automatic fallback to stable | Phase 2 (Kafka) handles this via per-message filter + K8s pod-watch (`canaryReady`): stable picks up flagged events when canary is dead. Phase 3.b does **not** replicate that. The order-service controller routes by header alone — when canary deployments are unhealthy, flagged requests POST to `/CheckoutSagaCanary/...` and Restate either 404s (no canary registered) or retries indefinitely (registered but URL unreachable). Failure surfaces as HTTP 502/503 to the client. Mitigation is operational — fix canary or stop sending flagged traffic at Istio. By design, not a bug; the synchronous request path makes failure observable to the client (unlike Phase 2's Kafka black-hole risk), so the elaborate watch-and-takeover machinery isn't load-bearing here. See "Asymmetry with Phase 2" note below.    |
 
 ### TerminalException / retryable distinction
 
@@ -369,6 +370,19 @@ Unchanged from Phase 3.a. Both `*Stable` and `*Canary` impls share error semanti
 | F4           | `saga-variant-binding.test.ts`                    |
 | F5           | startup self-check (log-asserted, not e2e)        |
 | F6           | `http.test.ts` + R1-R6 auditTrail assertions      |
+| F7           | Documented; no test (operational concern, not a code path) |
+
+### Asymmetry with Phase 2's stable-takes-over rule
+
+Phase 2's spec includes "rule #2 — if `x-canary=true` AND canary pod NOT deployed, stable processes (fallback)." Implementation: stable's Kafka listener checks `xCanary && canaryReady` before skipping; `canaryReady` is maintained by a K8s pod-watch on `app=<svc>,version=canary` selector. This is essential because Kafka events that nobody consumes are *silently dropped* — fallback prevents black-hole.
+
+Phase 3.b does **not** implement an analogous fallback. The order-service HTTP controller routes by `x-canary` header alone, with no awareness of canary deployment health. Rationale:
+
+- **Failure shape is different.** A flagged HTTP request that hits a dead canary returns HTTP 502/503 to the client *immediately observable*. The client (or its retry layer) can drop the flag and retry without it. There's no silent loss like Kafka's case.
+- **Cost of parity is non-trivial.** A faithful Phase 2 mirror would require: (i) a K8s pod-watch on `app=order-service,version=canary` in order-service-stable; (ii) controller logic that reads both header AND `canaryReady` before choosing `/CheckoutSaga<Variant>/...`; (iii) similar plumbing in any future service that fronts a saga. Possible, but implementation + operational complexity isn't justified by the synchronous-error-path's existing surfacing.
+- **Operational mitigation is sufficient for a reference architecture.** Operators detect canary outages via standard pod readiness alarms; flagged traffic is stopped at the Istio VirtualService; canary is fixed or retired via the runbook above. The pod-watch + filter machinery from Phase 2 is over-engineering on top of synchronous semantics.
+
+If automatic fallback becomes a real operational requirement (e.g., in a production fork of this reference architecture), Option B from the original review applies: extend the existing Phase 2 `presenceWatcher` in order-service to publish a `canaryReady` boolean, and have the HTTP controller fall through to `*Stable` when `canaryReady` is false. ~50 lines of code; reuses existing watch infrastructure.
 
 R6 is the headline fast-path subset-isolation assertion. R7 is the headline cluster-verify that proves the operational story (registration coexistence, teardown).
 
