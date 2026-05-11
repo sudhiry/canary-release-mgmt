@@ -4,6 +4,7 @@ import com.canary.payment.handler.PaymentVOImplCanary;
 import com.canary.payment.handler.PaymentVOImplStable;
 import com.canary.payment.store.ChargeStore;
 import com.canary.platform.lib.XCanaryRestateClientCustomizer;
+import com.canary.platform.lib.observability.CanaryRestateMeter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.restate.sdk.endpoint.Endpoint;
 import dev.restate.sdk.http.vertx.RestateHttpServer;
@@ -57,8 +58,9 @@ public class RestateEndpointConfig {
             ChargeStore store,
             XCanaryRestateClientCustomizer canary,
             KafkaTemplate<String, String> kafkaTemplate,
-            ObjectMapper objectMapper) {
-        return new PaymentVOImplStable(store, canary, kafkaTemplate, objectMapper);
+            ObjectMapper objectMapper,
+            CanaryRestateMeter meter) {
+        return new PaymentVOImplStable(store, canary, kafkaTemplate, objectMapper, meter);
     }
 
     @Bean
@@ -67,8 +69,9 @@ public class RestateEndpointConfig {
             ChargeStore store,
             XCanaryRestateClientCustomizer canary,
             KafkaTemplate<String, String> kafkaTemplate,
-            ObjectMapper objectMapper) {
-        return new PaymentVOImplCanary(store, canary, kafkaTemplate, objectMapper);
+            ObjectMapper objectMapper,
+            CanaryRestateMeter meter) {
+        return new PaymentVOImplCanary(store, canary, kafkaTemplate, objectMapper, meter);
     }
 
     @PostConstruct
