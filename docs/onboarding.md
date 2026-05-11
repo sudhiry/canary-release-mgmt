@@ -365,3 +365,14 @@ make down               # destroy the cluster (optional)
 When you're ready to contribute, [the README](../README.md#contributing)
 has the conventional flow (it's short — basically: change → `make verify`
 → if you touched the cluster path, `make smoke-canary` + `make ci-local`).
+
+## Runbooks
+
+When the canary observability dashboards (Grafana → "Canary — Overview", "Canary — Substrates", "Canary — Traces") show an incident, follow one of these runbooks:
+
+- [Canary burning budget](runbooks/canary-burning-budget.md) — canary error/latency clearly worse than stable
+- [Canary lane drift](runbooks/canary-lane-drift.md) — `canary_lane_active` gauge in unexpected state
+- [Canary lane stuck](runbooks/canary-lane-stuck.md) — past bake window without promotion or rollback
+- [Restate invocation failure spike](runbooks/restate-invocation-failure-spike.md) — handler outcome != success
+
+Dashboards are loaded by `deploy/kind/observability/install.sh` into Grafana via the sidecar ConfigMap mechanism. JSON sources live in `deploy/kind/observability/dashboards/`.
