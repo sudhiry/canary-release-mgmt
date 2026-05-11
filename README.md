@@ -1,4 +1,4 @@
-# canary-release-mgmt
+# Canary Release Management
 
 **A working reference architecture for safely rolling out new versions of services across HTTP, Kafka, and Restate — on your laptop.**
 
