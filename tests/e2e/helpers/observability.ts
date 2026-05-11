@@ -1,5 +1,6 @@
 // tests/e2e/helpers/observability.ts
 import axios from "axios";
+import { findPodByLabel, portForwardPod, type PodPortForward } from "./pod-port-forward.js";
 
 export interface PromInstantSample {
   metric: Record<string, string>;
@@ -61,4 +62,24 @@ export async function searchJaegerTraces(
   }
   const body = r.data as { data?: JaegerTraceSummary[] };
   return body.data ?? [];
+}
+
+// Local port allocator base for observability ports — start at 19000 to avoid
+// collisions with consumed-events.ts (18000) and traffic.ts (8080).
+let nextObsPort = 19000;
+
+export async function openPrometheusForward(): Promise<PodPortForward> {
+  const pod = await findPodByLabel("istio-system", "app.kubernetes.io/name=prometheus");
+  return portForwardPod("istio-system", pod, nextObsPort++, 9090);
+}
+
+export async function openGrafanaForward(): Promise<PodPortForward> {
+  const pod = await findPodByLabel("istio-system", "app.kubernetes.io/name=grafana");
+  return portForwardPod("istio-system", pod, nextObsPort++, 3000);
+}
+
+export async function openJaegerForward(): Promise<PodPortForward> {
+  // The jaeger addon ships with the query API on 16686.
+  const pod = await findPodByLabel("istio-system", "app=jaeger");
+  return portForwardPod("istio-system", pod, nextObsPort++, 16686);
 }
