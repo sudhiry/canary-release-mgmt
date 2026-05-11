@@ -14,9 +14,11 @@ canary routing on every substrate.
 > Kafka consumer groups, and a presence-watch protocol that lets stable
 > take over when canary becomes unhealthy.
 
-Phase 1 (HTTP canary) and Phase 2 (Kafka canary) are merged. Phase 2.c
-(schema evolution), Phase 3 (Restate canary), Phase 4 (CI/CD + percent-split
-\+ Argo Rollouts), and Phase 5 (observability polish) are future work.
+Phase 1 (HTTP canary), Phase 2 (Kafka canary), Phase 3 (Restate canary —
+β routing with variant-isolated `*Stable` / `*Canary` handlers), and
+Phase 5 (observability — per-lane metrics, OTel tracing, Grafana
+dashboards, runbooks) are merged. Phase 2.c (schema evolution) and
+Phase 4 (CI/CD + percent-split + Argo Rollouts) are deferred.
 
 ## TL;DR — first 10 minutes
 
@@ -85,8 +87,8 @@ canary-release-mgmt/
 │   └── traffic-cli/          # send a single /api/orders POST with/without x-canary
 ├── tests/
 │   ├── infra/ services/ canary/   # bats smoke tests
-│   └── e2e/                       # 13 HTTP + 5 Kafka scenarios (vitest)
-└── docs/                     # architecture, mechanics, development, operations, history
+│   └── e2e/                       # 13 HTTP + 6 Kafka + 7 Restate + 1 observability scenarios (vitest)
+└── docs/                     # architecture, mechanics, development, operations, history, runbooks
 ```
 
 ## Common workflows
@@ -97,13 +99,14 @@ canary-release-mgmt/
 | Bring up the substrate | `make up && make smoke-infra` |
 | Build + deploy all services | `make build-services && make build-images && make load-images && make deploy-services` |
 | Run all unit tests | `make verify` |
-| Run all e2e scenarios | `make e2e` (~15 min) |
+| Run all e2e scenarios | `make e2e` (~20 min, S1–S13 + K1–K6 + R1–R7 + O1) |
 | Run the fast inner-loop e2e subset | `make ci-local` (~5 min, S1+S2+S5+S8+S9+S12) |
 | Deploy a canary | `make canary-deploy SVC=<svc> TAG=<tag>` |
 | Inspect canary state | `make canary-status SVC=<svc>` |
 | Roll a canary back | `make canary-rollback SVC=<svc>` |
 | Repair canary drift | `make canary-reconcile SVC=<svc>` |
 | Open observability dashboards | `make dashboards` (Kiali / Grafana / Prometheus / Jaeger) |
+| View canary dashboards | Grafana → "Canary — Overview / Substrates / Traces" (UIDs `canary-overview`, `canary-substrates`, `canary-traces`) |
 | Tear down | `make down` |
 
 `make help` lists every target.
@@ -125,9 +128,33 @@ Don't bump the Restate server pin without testing both SDKs.
 - **K1 e2e saga timeout (deferred).** K1's flagged-saga path hangs past 5
   min on a real cluster; unit tests still pass. Tracked as a Phase 2
   follow-up — see [docs/operations.md#known-issues](docs/operations.md#known-issues).
-- **Phase 2.c, Phase 3 deferred.** Schema evolution and Restate canary
-  handler versioning are explicitly out of scope today. See
+- **Phase 3.b — no automatic stable-takes-over for Restate.** When canary
+  is unhealthy, flagged requests still POST to `*Canary` and surface as
+  HTTP 502/503 (deliberate asymmetry with Phase 2's Kafka graceful
+  fallback). Operational mitigation + teardown runbook live in
+  [docs/operations.md](docs/operations.md#phase-3b-trade-offs--operational-notes).
+- **Phase 2.c and Phase 4 deferred.** Schema evolution and CI/CD +
+  percent-split routing are out of scope today. See
   [docs/history.md](docs/history.md) for the deferral rationale.
+
+## Observability (Phase 5)
+
+Three canary-aware Grafana dashboards ship with the substrate
+(installed by `deploy/kind/observability/install.sh` via the Grafana
+sidecar ConfigMap):
+
+| Dashboard | UID | What it shows |
+|---|---|---|
+| Canary — Overview | `canary-overview` | Lane-active matrix, error rate + p95 latency by service × lane |
+| Canary — Substrates | `canary-substrates` | Per-substrate (http / kafka / restate) request rate, error rate, duration heatmap, top-10 slowest targets |
+| Canary — Traces | `canary-traces` | Jaeger trace search filtered by `service` + `lane` |
+
+Metrics emitted by `platform/lib-{java,node}/observability`:
+`canary_request_total`, `canary_request_duration_seconds`,
+`canary_lane_active` (gauge tagged by service + substrate + lane).
+OTel tracing is wired end-to-end with the `canary.lane` span attribute.
+Four runbooks under [docs/runbooks/](docs/runbooks/) cover the
+common incident classes the dashboards surface.
 
 ## Contributing
 

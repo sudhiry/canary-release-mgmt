@@ -125,6 +125,7 @@ Key knobs every service honors:
 | `RESTATE_INGRESS_URL` | `http://localhost:9070` (cluster: `http://restate.restate:9070`) | Restate admin |
 | `POD_NAMESPACE` | `services` | Where the presence watcher looks for canary pods |
 | `SERVICE_NAME` | (per service) | Stamped into `x-served-chain` and used by the presence watcher selector |
+| `OTLP_TRACING_ENDPOINT` | `http://jaeger-collector.istio-system:4317` | OTLP gRPC endpoint for traces (Phase 5.b). Both stacks honor this. |
 
 ## Running tests
 
@@ -154,13 +155,22 @@ make smoke-canary     # post-`make deploy-services`; ~3 min
 
 ### End-to-end scenarios
 
-13 HTTP scenarios (S1–S13) plus 5 Kafka scenarios (K1–K5), each in its own
-file under [tests/e2e/](../tests/e2e/). Vitest is configured for a single
+27 scenarios across four families, each in its own file under
+[tests/e2e/](../tests/e2e/). Vitest is configured for a single
 sequential fork pool because every scenario mutates cluster state.
 
+| Family | Files | Phase |
+|---|---|---|
+| HTTP | S1–S13 | 1.5 |
+| Kafka | K1–K6 (K6 opt-in via `RUN_COLD_CLUSTER_TESTS=true`) | 2.b |
+| Restate | R1–R7 (R4/R5 opt-in via `RUN_SLOW=1`; R7 cluster-lifecycle opt-in) | 3.a + 3.b |
+| Observability | O1 (local + cluster smoke) | 5.d |
+
 ```bash
-make e2e                      # all 18, ~15 min
+make e2e                      # all (~20 min)
 make e2e SCENARIO=s7          # single scenario
+make e2e SCENARIO=r6          # Restate isolation
+make e2e SCENARIO=o1          # observability validator
 make ci-local                 # fast subset: S1, S2, S5, S8, S9, S12 — ~5 min
 ```
 
@@ -200,6 +210,35 @@ or the readiness configuration, run `make smoke-canary` AND eyeball
 --bootstrap-server localhost:9092 --list` to confirm all 6 expected groups
 appear (`<svc>-stable` × 5 + `audit-service-canary` × 1 once you deploy
 that canary, plus per-deploy `<svc>-canary` groups).
+
+## Observability (Phase 5)
+
+Both stacks emit canary-aware metrics + traces out of the box once a
+service imports the platform library. Surface:
+
+- Metrics on `/actuator/prometheus` (both stacks). Pods carry
+  `prometheus.io/scrape: "true"` so the in-cluster Prometheus picks
+  them up automatically.
+- Traces via OTLP gRPC to `OTLP_TRACING_ENDPOINT` (default
+  `jaeger-collector.istio-system:4317`). Java wires this in
+  `application.yml`; Node wires it via `initTracing(...)` called
+  during service bootstrap.
+- The four meters (`canary_request_total`,
+  `canary_request_duration_seconds`, `canary_lane_active`, plus a
+  per-handler counter/histogram pair) are tagged with `service`,
+  `target`, `substrate`, `lane`, `outcome`.
+- Spans are tagged with `canary.lane` + `canary.service`.
+
+When editing the Java side, the auto-config wiring lives in
+`platform/lib-java/src/main/java/com/canary/platform/lib/observability/`
+(`CanaryMetricsAutoConfiguration`, `TracingAutoConfiguration`). The
+Node side is opt-in per-service — see
+`platform/lib-node/src/observability/` for the export surface and
+`services/order-service/src/http.ts` for canonical wiring.
+
+The canary dashboards live in
+`deploy/kind/observability/dashboards/`. After editing a JSON,
+re-apply with `ISTIO_VERSION=$ISTIO_VERSION bash deploy/kind/observability/install.sh`.
 
 ## Build artifacts
 

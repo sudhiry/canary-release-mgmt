@@ -41,7 +41,9 @@ when canary becomes unhealthy.
                 audit-service (Java, 8083 — consumes every *.events topic)
 
    Restate (`localhost:9070` admin) — every service registers its handlers
-   on startup; saga orchestration lands here in Phase 3.
+   on startup; the `/api/orders` saga is durably orchestrated here
+   (Phase 3.a) and the canary subset registers under variant-isolated
+   `*Canary` service names (Phase 3.b β routing).
 ```
 
 Rendered version (GitHub):
@@ -201,13 +203,15 @@ canary-release-mgmt/
 │   ├── infra/smoke.bats      # post-`make up` infrastructure smoke
 │   ├── services/deploy.bats  # post-`make deploy-services` smoke
 │   ├── canary/canary-ctl.bats# canary-ctl integration smoke
-│   └── e2e/                  # 13 HTTP scenarios (S1–S13) + 5 Kafka scenarios (K1–K5)
+│   └── e2e/                  # 13 HTTP (S1–S13) + 6 Kafka (K1–K6) + 7 Restate (R1–R7) + 1 observability (O1)
 └── docs/
     ├── architecture.md       # this file
     ├── canary-mechanics.md   # how x-canary propagation + presence-watch + per-subset groups work
     ├── development.md        # local setup, build, test, run
     ├── operations.md         # deploy / canary lifecycle / troubleshooting
-    ├── history.md            # phase-by-phase implementation log (was the README)
+    ├── onboarding.md         # 30-minute new-developer walkthrough
+    ├── history.md            # phase-by-phase implementation log
+    ├── runbooks/             # Phase 5.d incident runbooks (burning budget, lane drift, lane stuck, restate failure)
     └── superpowers/          # design specs and implementation plans (one per phase/subphase)
 ```
 
@@ -249,11 +253,37 @@ canary consumer groups pick up the pre-warm trail) and each Java
 [development.md](development.md#known-spring-boot-4-quirks) for the full
 context.
 
+## Observability surface (Phase 5)
+
+Both libraries ship a canary-aware observability surface that produces
+the per-lane metrics + traces the canary dashboards (in
+`deploy/kind/observability/dashboards/`) consume:
+
+| Concern | `lib-java` | `lib-node` |
+|---|---|---|
+| Per-lane request count + duration | `CanaryMetrics` + `CanaryHttpSpanFilter` (servlet filter) | `CanaryMetrics` + `canaryHttpMetricsMiddleware` |
+| Per-lane Kafka consumer timing | `CanaryKafkaRecordInterceptor` | `wrapKafkaConsumer` |
+| Per-handler Restate metric emission | `CanaryRestateMeter` | `measureRestate` |
+| Lane-active gauge from K8s endpoints | `LaneStateProbe` | `LaneStateProbe` |
+| OTel tracing init + `canary.lane` span attribute | `TracingAutoConfiguration` (auto-wired) | `initTracing` (called once per service) |
+| Prometheus scrape endpoint | `/actuator/prometheus` (Spring Actuator) | `canaryMetricsEndpoint` (`/actuator/prometheus`) |
+
+The shipped meters: `canary_request_total` (counter),
+`canary_request_duration_seconds` (histogram), `canary_lane_active`
+(gauge), plus a per-handler counter/histogram pair. All carry `service`,
+`target`, `substrate`, `lane`, `outcome` tags as appropriate. Grafana
+loads the canary dashboards via the sidecar ConfigMap mechanism
+(`grafana_dashboard: "1"` label, applied by
+`deploy/kind/observability/install.sh`).
+
 ## Where things go next
 
 Phase 1 (HTTP canary), Phase 2.a + 2.b (Kafka canary), Phase 3.a
-(Restate substrate completion), and Phase 3.b (Restate canary handler
-versioning — β routing) are all merged. Phase 2.c (schema evolution),
-Phase 4 (percent-split + Argo Rollouts + CI/CD), and Phase 5
-(observability polish) are deferred. See [history.md](history.md) for
-a phase-by-phase log of what shipped and why.
+(Restate substrate completion), Phase 3.b (Restate canary handler
+versioning — β routing), and Phase 5.a + 5.a-node + 5.b + 5.d
+(observability — instrumentation, trace propagation, dashboards +
+runbooks) are all merged. Phase 2.c (schema evolution), Phase 4
+(percent-split + Argo Rollouts + CI/CD), and Phase 5.c (on-call
+ergonomics: alerting + SLOs) are deferred or skipped. See
+[history.md](history.md) for a phase-by-phase log of what shipped
+and why.

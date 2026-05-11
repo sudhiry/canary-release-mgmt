@@ -258,15 +258,200 @@ scenario where canary publishes `schemaVersion=2` and stable rejects
 gracefully. A registry choice (Confluent, Apicurio, Karapace) and wire
 format (JSON / Avro / Protobuf) is a separate brainstorming session.
 
+## Phase 3 — Restate canary
+
+Phase 3 added Restate-substrate canary mechanics. Decomposed into 3.a
+(make the Phase 1 stub-saga durable on Restate) and 3.b (variant-isolated
+handler dispatch for canary).
+
+### Plan 3.a — Restate substrate completion (complete, merged 2026-05-10, 2652419)
+
+Phase 1.5's stub `/api/orders` saga ran ad-hoc axios calls. Phase 3.a
+made the saga **durable**: the order-service HTTP controller submits to
+the Restate Ingress, and a `CheckoutSaga` handler running inside the
+order-service pod itself drives the inventory → payment → notification
+calls via Restate's durable execution machinery. The saga is still
+header-aware — it inherits `x-canary` from the inbound request and
+propagates it on every downstream HTTP / Kafka call. Acceptance lives
+in `tests/e2e/r1-r5-restate-saga.test.ts` (R1 happy path, R2 payment
+compensation, R3 notify compensation, R4 + R5 reservation-workflow
+slow path — opt-in via `RUN_SLOW=1`).
+
+### Plan 3.b — Canary handler versioning (complete, merged 2026-05-11, 0463ceb)
+
+Two routing models were considered:
+
+- **α (native)** — both subsets register the same service name; rely
+  on Restate's deployment-version selector to pick canary. Closest to
+  the Restate-recommended model and would have made
+  `restate invocations pause/resume <id> --deployment <new>` work for
+  redirecting in-flight invocations off a buggy canary.
+- **β (variant-isolated names)** — stable registers
+  `CheckoutSagaStable` / `ReservationWorkflowStable` / `PaymentVOStable`
+  / `NotificationServiceStable`; canary registers the same handlers
+  under `*Canary` names. The order-service HTTP controller picks the
+  variant by reading the incoming `x-canary` header.
+
+**β was chosen.** It composes cleanly with Phase 1's header-routing
+mental model and gives a falsifiable test invariant ("a `*Canary`
+invocation cannot reach a stable handler" — verifiable from the
+Restate admin API alone), at the cost of losing Restate's
+pause/resume primitive: a `*Canary` invocation **cannot** be resumed
+onto stable, since Restate's pause/resume requires the resume target
+to expose the **same** service name. Canary teardown in β has only
+two drain modes — graceful (`deployment describe --extra`, wait for
+in-flight count to reach 0, then `deployments remove`) or emergency
+(`invocations cancel` per id, then `deployments remove --force`).
+
+Variant isolation is enforced by **three independent layers**:
+
+1. **Registration under distinct service names.** Stable + canary post
+   to `/deployments` with their own per-subset URI and the discovery
+   round-trip returns variant-suffixed service names.
+2. **In-saga client construction picks the variant.** The
+   `CheckoutSaga*` handler reads `x-canary` from its invocation
+   metadata and constructs Restate clients for `*Stable` or `*Canary`
+   downstreams accordingly.
+3. **K8s endpoint selection.** Per-subset Services
+   (`<svc>-stable` / `<svc>-canary`) give Restate variant-isolated URLs
+   to dispatch against, since Restate's pods sit outside the Istio
+   mesh and cannot apply DestinationRule subsetting.
+
+Each canary handler ships one observable behavioral tweak so test
+assertions are falsifiable: `Order.auditTrail` includes a per-hop
+`<svc>@canary` entry, `Reservation.bufferUnits=1`, `Charge.amount`
+applies a 1% discount, `NotifyResult.deliveredMessage` is suffixed
+with `[via canary notifier]`. Acceptance lives in
+`tests/e2e/r6-restate-canary-isolation.test.ts` (R6 — concurrent
+flagged + unflagged orders maintain isolation under load) and
+`tests/e2e/r7-restate-canary-deploy-lifecycle.test.ts` (R7 — both
+variants register without conflict, per-subset Services have correct
+selectors, in-flight isolation across canary teardown).
+
+#### Deliberate asymmetry with Phase 2 — no automatic stable-takes-over
+
+Phase 2's Kafka path implements graceful fallback ("if `x-canary=true`
+AND canary pod NOT deployed, stable processes") via the
+`XCanaryPresenceWatcher` + per-message filter. **Phase 3.b does not
+replicate this.** The order-service HTTP controller routes by header
+alone; when canary is unhealthy, flagged requests still POST to
+`/CheckoutSagaCanary/...` and Restate either 404s or retries the dead
+URL until an operator intervenes. Failure surfaces as HTTP 502/503 —
+**observable to the client** (unlike Phase 2's Kafka black-hole risk
+that made fallback essential). Operational mitigation: standard pod
+readiness alarms + stop flagged traffic at the Istio VirtualService
+during canary outages.
+
+### Plan 3.b — open items deferred to user
+
+R7 cluster lifecycle verification (the full deploy → drain → teardown
+flow against a real kind cluster, including the graceful-vs-emergency
+decision branch) was deferred to user-driven verification. The
+underlying β isolation invariants are exercised by R6 + the
+admin-API-only checks in R7.
+
+## Phase 5 — Observability
+
+Phase 5 added the per-lane observability surface (metrics, traces,
+dashboards, runbooks) that lets an operator answer "is the canary
+worse than stable, and where?" from the dashboards alone. Decomposed
+into 5.a (Java instrumentation foundation), 5.a-node (Node mirror),
+5.b (trace propagation + Restate handler metric wiring), and 5.d
+(focused dashboards + runbooks + an observability validator).
+Phase 4 and Phase 5.c (on-call ergonomics) were skipped — no
+percent-split driver and no on-call audience for this reference repo.
+
+### Plan 5.a — Java instrumentation foundation (complete, merged 2026-05-11, e26b201)
+
+Five `CanaryMetrics`-backed Spring beans wired by
+`CanaryMetricsAutoConfiguration` emit the four canary-aware meters
+on every request, every Kafka record, and every Restate handler:
+
+- `canary_request_total` (counter; tags: `service`, `target`, `substrate`, `lane`, `outcome`)
+- `canary_request_duration_seconds` (histogram; same tags)
+- `canary_lane_active` (gauge; tags: `service`, `substrate`, `lane`)
+- per-handler counter/histogram via `CanaryRestateMeter`
+
+`LaneStateProbe` watches K8s endpoints for `app=<svc>,version=canary`
+and emits the lane gauge. `CanaryHttpSpanFilter` tags the active span
+with `canary.lane` + `canary.service`. `TracingAutoConfiguration`
+strips inherited lane tags from non-canary meters (so the cardinality
+explosion only happens on the canary-aware meters).
+
+Spring Boot 4 wiring quirks discovered during 5.a:
+
+- `CanaryMetricsAutoConfiguration` had to switch to
+  `@ConditionalOnClass` (not `@ConditionalOnBean`) — Spring Boot 4's
+  auto-config ordering surfaced bean-initialization races.
+- Pod template gained Prometheus scrape annotations
+  (`prometheus.io/scrape: "true"` + path `/actuator/prometheus`).
+- Service scope: 5.a was Java-only. Node services landed in 5.a-node.
+
+### Plan 5.a-node — Node observability instrumentation (complete, merged 2026-05-11, 3f30eae)
+
+Mirror of 5.a for the Node side, exported from
+`platform/lib-node/src/observability/`:
+
+- `CanaryMetrics` — central helper for the four meters, backed by `prom-client`.
+- `canaryHttpMetricsMiddleware` — Express middleware that times each request per-lane. Registered **inside `setupHttp`** so it fires before routes (regression caught and fixed in [f4eb977](https://github.com/anthropics/canary-release-mgmt/commit/f4eb977)).
+- `wrapKafkaConsumer` — times `eachMessage` per-lane.
+- `measureRestate` — handler-level metric emission helper.
+- `canaryMetricsEndpoint` — exposes the prom registry at `/actuator/prometheus`.
+- `initTracing` — OTel NodeSDK + auto-instrumentations + adds `canary.lane` as a span attribute.
+- `LaneStateProbe` — emits `canary_lane_active` for Node services.
+
+Both `order-service` and `notification-service` were wired with OTel
+tracing + canary metrics + lane gauge.
+
+### Plan 5.b — trace propagation + Restate handler metric wiring (complete, merged 2026-05-11, 3362564)
+
+Closed the gaps between 5.a's per-bean instrumentation and an
+end-to-end trace from edge → Kafka → Restate → handler:
+
+- Restate runtime tracing turned on, OTLP'd to Jaeger.
+- Spring Kafka observation enabled on the listener container factory + every `KafkaTemplate`, so Kafka producer + consumer spans appear in the same trace as the originating HTTP request.
+- Every Java Restate handler wrapped with `CanaryRestateMeter` (PaymentVO, ReservationWorkflow, AuditQueryService).
+- Every Node Restate handler wrapped with `measureRestate` (order-service, notification-service).
+
+### Plan 5.d — focused dashboards + runbooks + observability validator (complete, merged 2026-05-11, 514951f)
+
+Three Grafana dashboards (JSON sources under
+`deploy/kind/observability/dashboards/`, applied via the Grafana
+sidecar ConfigMap mechanism — `grafana_dashboard: "1"` label):
+
+- **Canary — Overview** (uid `canary-overview`) — lane-active matrix, error rate + p95 latency by service × lane.
+- **Canary — Substrates** (uid `canary-substrates`) — per-substrate (http / kafka / restate) request rate, error rate, duration heatmap, top-10 slowest targets.
+- **Canary — Traces** (uid `canary-traces`) — Jaeger trace search filtered by `service` + `lane`.
+
+`deploy/kind/observability/install.sh` applies the dashboards
+ConfigMap on every install. Four runbooks under
+[`docs/runbooks/`](runbooks/) cover the incident classes the
+dashboards surface — canary burning budget, canary lane drift,
+canary lane stuck, Restate invocation failure spike.
+
+Acceptance scenario O1 (`tests/e2e/o1-observability-validator.test.ts`)
+asserts: local JSON parses with matching uid + title, Grafana serves
+each dashboard by uid, Prometheus has the three canary meters present
+with `lane=canary` samples, and Jaeger has at least one trace tagged
+`canary.lane=canary`.
+
+### Phase 4 + Phase 5.c — skipped
+
+Phase 4 (CI/CD + percent-split + Argo Rollouts) and Phase 5.c
+(on-call ergonomics — alert rules, paging, SLOs) were deliberately
+skipped for this reference repo: no percent-split driver is in scope
+(header-routed canary is bounded by clients), and there is no on-call
+audience to page. The shipped runbooks + dashboards are sufficient
+for a developer-laptop demonstration.
+
 ## Future phases
 
-| Phase | Focus |
-|---|---|
-| 2.c | Schema evolution (deferred) |
-| 3 | Restate canary handler versioning + durable-execution safety |
-| 4 | CI/CD, percent-split routing, automated promotion (Argo Rollouts or Flagger), GitHub Actions, OPA/Kyverno policies, canary-ctl as a controller |
-| 5 | Observability polish (Grafana dashboards, alerting, runbooks, SLOs) |
+| Phase | Focus | Status |
+|---|---|---|
+| 2.c | Schema evolution (`schemaVersion` field, registry choice, `XCanarySchemaFilter`, K6-style scenario) | Deferred |
+| 4 | CI/CD, percent-split routing, automated promotion (Argo Rollouts or Flagger), GitHub Actions, OPA/Kyverno policies, canary-ctl as a controller | Skipped (no percent-split driver in scope) |
+| 5.c | On-call ergonomics — alert rules, SLOs, paging | Skipped (no on-call audience) |
 
-Phase 2 (Kafka canary) is feature-complete on the routing + readiness
-axes. Schema evolution → Phase 2.c. Restate canary handler versioning
-→ Phase 3. Argo Rollouts / percent-split → Phase 4.
+Phase 1 (HTTP), Phase 2.a + 2.b (Kafka), Phase 3.a + 3.b (Restate β),
+and Phase 5.a + 5.a-node + 5.b + 5.d (observability) are all merged
+and feature-complete on a developer laptop.

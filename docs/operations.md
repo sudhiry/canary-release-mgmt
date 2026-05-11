@@ -81,9 +81,36 @@ make dashboards-stop    # close all four
 | Dashboard | URL | Use for |
 |---|---|---|
 | Kiali | http://localhost:20001 | Per-subset traffic split (the canary smoke check) |
-| Grafana | http://localhost:3000 | Istio + Kafka panels |
-| Prometheus | http://localhost:9090 | Raw metric queries |
-| Jaeger | http://localhost:16686 | Distributed traces |
+| Grafana | http://localhost:3000 | Istio + Kafka panels + canary dashboards (see below) |
+| Prometheus | http://localhost:9090 | Raw metric queries (`canary_*` series) |
+| Jaeger | http://localhost:16686 | Distributed traces (filter by `canary.lane`) |
+
+### Canary observability dashboards (Phase 5.d)
+
+Three canary-aware Grafana dashboards are installed by
+`deploy/kind/observability/install.sh` as a sidecar-loaded ConfigMap
+(`grafana_dashboard: "1"` label):
+
+| Dashboard | UID | What it shows |
+|---|---|---|
+| Canary — Overview | `canary-overview` | Lane-active matrix, error rate + p95 latency by service × lane |
+| Canary — Substrates | `canary-substrates` | Per-substrate (http / kafka / restate) request rate, error rate, duration heatmap, top-10 slowest targets |
+| Canary — Traces | `canary-traces` | Jaeger trace search filtered by `service` + `lane` |
+
+Re-apply the dashboards after editing the JSON sources in
+`deploy/kind/observability/dashboards/`:
+
+```bash
+ISTIO_VERSION=$ISTIO_VERSION bash deploy/kind/observability/install.sh
+```
+
+When a dashboard surfaces an incident, follow one of the four runbooks
+in [docs/runbooks/](runbooks/):
+
+- [Canary burning budget](runbooks/canary-burning-budget.md) — canary error/latency clearly worse than stable
+- [Canary lane drift](runbooks/canary-lane-drift.md) — `canary_lane_active` gauge in unexpected state
+- [Canary lane stuck](runbooks/canary-lane-stuck.md) — past bake window without promotion or rollback
+- [Restate invocation failure spike](runbooks/restate-invocation-failure-spike.md) — handler outcome != success
 
 ## Canary lifecycle
 
@@ -199,8 +226,10 @@ for the reconcile policy).
 ## End-to-end test runs
 
 ```bash
-make e2e                       # all 18 (S1–S13 + K1–K5), ~15 min
+make e2e                       # all (S1–S13 + K1–K6 + R1–R7 + O1), ~20 min
 make e2e SCENARIO=s7           # single one
+make e2e SCENARIO=r6           # Restate isolation
+make e2e SCENARIO=o1           # observability validator
 make ci-local                  # S1, S2, S5, S8, S9, S12 — ~5 min
 ```
 
@@ -248,6 +277,28 @@ K1–K5 use `kubectl port-forward pod/<name>` (per subset) and query
 `/internal/consumed-events` directly, since Istio's subset-by-header
 routing is in-mesh-only and the edge gateway only routes `/api/orders`.
 Helpers in [tests/e2e/helpers/](../tests/e2e/helpers/).
+
+**Restate scenarios** (Phase 3.a + 3.b):
+
+| # | Name | What it asserts |
+|---|---|---|
+| R1 | Saga happy path (each variant) | All four R-to-R steps fire; reservation confirmed |
+| R2 | Payment compensation (each variant) | Payment refuses negative amount → reservation released |
+| R3 | Notify compensation (each variant) | Notify refuses → payment refunded; reservation stays confirmed |
+| R4 / R5 | Reservation-workflow slow path | Opt-in via `RUN_SLOW=1`; verifies long-running durable workflow + cancellation |
+| R6 | Restate subset isolation under concurrent traffic | Flagged + unflagged orders run concurrently and each traverses its own subset end-to-end; no cross-subset handler invocations |
+| R7 | Restate canary deployment lifecycle | Both variant deployments register without conflict, per-subset Services have correct selectors, in-flight isolation across canary teardown. Opt-in (requires a deployed canary on order-service) |
+
+R1–R3 run on both variants via `describe.each([stable, canary])`. R6 is
+the load-bearing β invariant test ("a `*Canary` invocation cannot reach
+a stable handler"). R7's cluster-lifecycle assertions are gated behind
+an env flag and are exercised manually rather than in CI.
+
+**Observability scenario** (Phase 5.d):
+
+| # | Name | What it asserts |
+|---|---|---|
+| O1 | Observability validator | Local: dashboard JSON parses with matching uid + title. Cluster: Grafana serves each dashboard by uid; Prometheus has `canary_request_total`, `canary_request_duration_seconds`, `canary_lane_active` with `lane=canary` samples; Jaeger has at least one trace tagged `canary.lane=canary` |
 
 ## Troubleshooting
 
@@ -342,29 +393,15 @@ an event's shape. Tracked separately; brainstorming the registry +
 wire-format choice (Confluent / Apicurio / Karapace, JSON / Avro /
 Protobuf) is its own session.
 
-### Restate canary handler versioning (Phase 3.b)
+## Phase 3.b trade-offs + operational notes
 
-Both stable and canary register their Restate handlers, but under
-*distinct* service names: `CheckoutSagaStable` / `CheckoutSagaCanary`,
-`ReservationWorkflowStable` / `ReservationWorkflowCanary`, etc. The
-HTTP controller in order-service reads the incoming `x-canary` header
-and posts to `/CheckoutSaga<Stable|Canary>/<orderId>/run` via the
-Restate Ingress; Restate dispatches each invocation to the registered
-deployment URL for that service name. Per-subset K8s Services
-(`<svc>-stable` / `<svc>-canary`) provide the variant-isolated URLs
-Restate uses, since Restate's pods sit outside the Istio mesh and
-cannot apply DestinationRule subset routing.
+Phase 3.b's β routing (variant-isolated `*Stable` / `*Canary` service
+names) shipped 2026-05-11. See
+[canary-mechanics.md → Restate path](canary-mechanics.md#restate-path)
+for the routing model. Two trade-offs are worth keeping in mind during
+operations:
 
-Each canary handler ships one observable behavioral tweak so test
-assertions are falsifiable: `Order.auditTrail` includes a per-hop
-`<svc>@canary` entry, `Reservation.bufferUnits=1`, `Charge.amount`
-applies a 1% discount, `NotifyResult.deliveredMessage` is suffixed with
-`[via canary notifier]`. End-to-end isolation is enforced by three
-independent layers (registration, in-saga client construction, K8s
-endpoint selection) — a `*Canary` invocation cannot reach a stable
-handler.
-
-**No automatic stable-takes-over fallback (asymmetry with Phase 2).**
+**No automatic stable-takes-over fallback (asymmetric with Phase 2).**
 Phase 2's Kafka path implements rule #2 — "if `x-canary=true` AND canary
 pod NOT deployed, stable processes" — via a K8s pod-watch
 (`canaryReady` boolean) plus a per-message filter on stable's
@@ -381,8 +418,8 @@ fork, extend Phase 2's `presenceWatcher` in order-service to publish a
 `canaryReady` boolean and have the controller fall through to `*Stable`
 when canary is unhealthy.
 
-**Trade-off — Restate's pause-resume recovery is unavailable in β.**
-Restate's [versioning docs](https://docs.restate.dev/services/versioning)
+**Restate's pause-resume recovery is unavailable in β.** Restate's
+[versioning docs](https://docs.restate.dev/services/versioning)
 recommend `restate invocations pause <id>` followed by
 `restate invocations resume <id> --deployment <new_id>` as the
 preferred mechanism for redirecting in-flight work off a buggy or
@@ -393,19 +430,22 @@ so a `*Canary` invocation cannot be resumed onto the stable deployment
 — Restate would fail with "service not found." This is a structural
 cost of choosing β over α, not a bug.
 
-Canary teardown in β therefore has only two drain modes:
+### Canary teardown runbook (β routing)
+
+Canary teardown in β has only two drain modes:
 
 - **Graceful** — `restate deployment describe <canary-id> --extra`,
   wait for in-flight count to reach 0 (worst case ~120s per parked
   reservation workflow), then `restate deployments remove <canary-id>`
-  and `helm uninstall <release>`.
+  and `helm uninstall <release>`. `canary-ctl rollback` follows this
+  path with a `--grace-seconds` (default 10) drain window.
 - **Emergency** — `restate invocations cancel <id>` for each in-flight,
   then `restate deployments remove <canary-id> --force`. The current
   sagas don't handle cancellation explicitly, so durable side effects
   (charges, reservations) may be left mid-state and require manual
   reconciliation via the per-service admin endpoints.
 
-Full runbook (with the explicit Restate CLI commands and
-graceful-vs-emergency decision flow): see the Phase 3.b spec at
+Full decision flow + explicit Restate CLI commands: see the Phase 3.b
+spec at
 `docs/superpowers/specs/2026-05-11-canary-release-phase-3-b-canary-handler-versioning-design.md`,
 section "Operational runbook (canary teardown)".
