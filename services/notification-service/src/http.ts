@@ -7,6 +7,8 @@ import {
   attachXCanaryAxiosInterceptor,
   attachXServedChainAxiosInterceptor,
   type KafkaHealthState,
+  type CanaryMetrics,
+  canaryHttpMetricsMiddleware,
 } from "@canary/lib-node";
 import type { NotifyRequest } from "@canary/restate-defs-node";
 import { notificationStore, consumedEventStore } from "./store.js";
@@ -16,6 +18,8 @@ export interface HttpDeps {
   kafkaHealth?: KafkaHealthState;
   /** "stable" | "canary"; defaults to process.env.VERSION ?? "stable". Only canary's /health is gated on Kafka health. */
   version?: string;
+  /** Optional CanaryMetrics for HTTP request observability. */
+  metrics?: CanaryMetrics;
 }
 
 export function buildIngressClient(ingressUrl: string): AxiosInstance {
@@ -45,6 +49,9 @@ export function setupHttp(deps: HttpDeps): Express {
   app.use(xCanaryMiddleware);
   app.use(xServedVersionMiddleware());
   app.use(xServedChainMiddleware());
+  if (deps.metrics) {
+    app.use(canaryHttpMetricsMiddleware(deps.metrics));
+  }
 
   app.post("/notifications", async (req, res) => {
     const body = req.body as NotifyRequest;
