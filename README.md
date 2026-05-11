@@ -228,18 +228,22 @@ canary-release-mgmt/
 
 ---
 
-## ✅ What's shipped
+## ✅ What's in the box
 
-| Phase | Scope | Status |
-|---|---|---|
-| **Phase 1** | HTTP canary (Istio header routing, propagation, presence-watch) | ✅ Merged |
-| **Phase 2** | Kafka canary (per-subset consumer groups, graceful fallback) | ✅ Merged |
-| **Phase 2.c** | Kafka schema evolution | ⏸ Deferred |
-| **Phase 3** | Restate canary (β routing with `*Stable` / `*Canary` variant isolation) | ✅ Merged |
-| **Phase 4** | CI/CD + percent-split + Argo Rollouts | ⏸ Deferred |
-| **Phase 5** | Observability (lane-aware metrics, OTel tracing, Grafana dashboards, runbooks) | ✅ Merged |
+| Capability | Detail |
+|---|---|
+| **HTTP canary** | Istio header-based routing, automatic `x-canary` propagation across services, graceful fallback when no canary is deployed |
+| **Kafka canary** | Per-subset consumer groups (`<svc>-stable` / `<svc>-canary`), per-message header filter, presence-watch so stable takes over when canary is unhealthy |
+| **Restate canary** | β routing with variant-isolated `*Stable` / `*Canary` handler names, durable saga orchestration with explicit compensation |
+| **Observability** | Lane-aware metrics (`canary_request_total`, `canary_request_duration_seconds`, `canary_lane_active`), end-to-end OTel tracing across HTTP + Kafka + Restate, three Grafana dashboards, four incident runbooks |
+| **Lifecycle tooling** | `canary-ctl` for per-service deploy / rollback / status / reconcile with state-file recovery |
+| **Test coverage** | ~118 unit tests + 27 e2e scenarios (S1–S13 HTTP, K1–K6 Kafka, R1–R7 Restate, O1 observability) |
 
-See [docs/history.md](docs/history.md) for the deferral rationale and per-phase implementation log.
+**Not in scope** (intentionally deferred — rationale in [docs/design-decisions.md](docs/design-decisions.md#deferred-phases)):
+
+- Kafka **schema evolution** — schema registry choice, `schemaVersion` field, compatibility policy
+- **Percent-split routing + automated promotion** — Argo Rollouts / Flagger, GitHub Actions, OPA policies
+- **Production alerting** — Alertmanager, burn-rate SLOs, paging (no on-call audience for a reference repo)
 
 ---
 
