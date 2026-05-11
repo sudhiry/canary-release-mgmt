@@ -8,6 +8,8 @@ import {
   type KafkaHealthState,
   type KafkaConsumeHeaders,
   XCanaryPresenceWatcher,
+  wrapKafkaConsumer,
+  type CanaryMetrics,
 } from "@canary/lib-node";
 import { consumedEventStore } from "./store.js";
 
@@ -25,6 +27,8 @@ export interface KafkaSetupOptions {
   heartbeatStaleMs?: number;
   sendTimeoutMs?: number;
   reconnectIntervalMs?: number;
+  /** Optional CanaryMetrics instance — wraps the consumer's eachMessage with instrumentation. */
+  metrics?: CanaryMetrics;
   /**
    * Test-only: override the isCanaryReady supplier so tests can exercise the
    * stable+canaryReady filter cell without a real Kubernetes cluster.
@@ -129,6 +133,9 @@ export async function setupKafka(opts: KafkaSetupOptions): Promise<KafkaHandle> 
     // Background connect + subscribe + run, same rationale as producer:
     // a Kafka outage at boot must not block app.listen() or readiness probes.
     const consumerSetupPromise = (async () => {
+      if (opts.metrics) {
+        wrapKafkaConsumer(c, opts.metrics);
+      }
       while (true) {
         try {
           await c.connect();

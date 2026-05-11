@@ -1,7 +1,12 @@
+import "./tracing.js";   // MUST be first — initializes OTel SDK before express/kafkajs load
 import axios from "axios";
 import {
   attachXCanaryAxiosInterceptor,
   attachXServedChainAxiosInterceptor,
+  CanaryMetrics,
+  canaryHttpMetricsMiddleware,
+  canaryMetricsEndpoint,
+  LaneStateProbe,
 } from "@canary/lib-node";
 import { loadConfig } from "./config.js";
 import { setupHttp } from "./http.js";
@@ -9,6 +14,14 @@ import { setupKafka } from "./kafka.js";
 import { setupRestate } from "./restate.js";
 
 const config = loadConfig();
+
+const metrics = new CanaryMetrics("order");
+const laneProbe = new LaneStateProbe(
+  process.env.POD_NAMESPACE ?? "services",
+  "order",
+);
+laneProbe.registerGauges();
+void laneProbe.start();
 
 const ingressClient = axios.create({ baseURL: config.RESTATE_INGRESS_URL });
 attachXCanaryAxiosInterceptor(ingressClient);
@@ -19,6 +32,7 @@ const kafka = await setupKafka({
   consumersEnabled: config.KAFKA_CONSUMERS_ENABLED,
   producerEnabled: config.KAFKA_PRODUCER_ENABLED,
   heartbeatStaleMs: config.KAFKA_HEARTBEAT_STALE_MS,
+  metrics,
 });
 
 const app = setupHttp({
@@ -27,6 +41,8 @@ const app = setupHttp({
   kafkaHealth: kafka.health,
   version: process.env.VERSION ?? "stable",
 });
+app.use(canaryHttpMetricsMiddleware(metrics));
+app.get("/actuator/prometheus", canaryMetricsEndpoint(metrics));
 
 const server = app.listen(config.HTTP_PORT, () => {
   console.log(`order-service HTTP listening on ${config.HTTP_PORT}`);
@@ -39,6 +55,7 @@ await setupRestate({
 
 const shutdown = async () => {
   console.log("order-service shutting down");
+  laneProbe.close();
   if (kafka.presenceWatcher) kafka.presenceWatcher.close();
   if (kafka.consumer) await kafka.consumer.disconnect().catch(() => {});
   if (kafka.producer) await kafka.producer.disconnect().catch(() => {});
