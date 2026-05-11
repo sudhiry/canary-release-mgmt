@@ -46,6 +46,7 @@ configureKafkaSend(kafka.send);
 await setupRestate({
   registerHandlers: config.RESTATE_REGISTER_HANDLERS,
   port: config.RESTATE_HANDLER_PORT,
+  metrics,
 });
 
 const shutdown = async () => {
