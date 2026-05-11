@@ -1,101 +1,217 @@
 # canary-release-mgmt
 
-A reference architecture for canary release management across HTTP, Kafka,
-and Restate.dev in a polyglot microservice system. Five domain services in
-two stacks (TypeScript + Node, Java + Spring Boot 4) deploy to a local
-**kind** cluster behind Istio, exchange events through Kafka, and register
-durable handlers with Restate. A single `x-canary: true` HTTP header drives
-canary routing on every substrate.
+**A working reference architecture for safely rolling out new versions of services across HTTP, Kafka, and Restate — on your laptop.**
 
-> **What's the point?** This repo answers the question *"how do you canary
-> a polyglot, event-driven, durably-orchestrated microservice system without
-> harming stable releases?"* — concretely, on a developer laptop, with the
-> same mechanics used in production: Istio header-based routing, per-subset
-> Kafka consumer groups, and a presence-watch protocol that lets stable
-> take over when canary becomes unhealthy.
+---
 
-Phase 1 (HTTP canary), Phase 2 (Kafka canary), Phase 3 (Restate canary —
-β routing with variant-isolated `*Stable` / `*Canary` handlers), and
-Phase 5 (observability — per-lane metrics, OTel tracing, Grafana
-dashboards, runbooks) are merged. Phase 2.c (schema evolution) and
-Phase 4 (CI/CD + percent-split + Argo Rollouts) are deferred.
+## 🧭 New here? Read this first
 
-## TL;DR — first 10 minutes
+### What is a "canary release"?
 
-```bash
-# Prereqs: docker, kind, kubectl, helm, istioctl 1.29.2, JDK 25, node 20+,
-# pnpm 9.12.0, bats, jq. Full list in docs/development.md.
+A canary release is when you deploy a new version of a service *alongside* the existing stable version, send a small slice of traffic to it, watch how it behaves, and either promote it or roll it back. The risky new code only sees the canary slice — stable users never get touched.
 
-git clone <repo-url> && cd canary-release-mgmt
-pnpm install                                    # workspace deps
+### What does this project do?
 
-make verify                                     # all unit tests, ~118 tests, no cluster needed
+It shows — concretely, end-to-end, on a single developer machine — **how to canary a polyglot, event-driven, durably-orchestrated microservice system without harming stable releases**.
 
-make up                                         # ~4 min — kind + Istio + Kafka + Restate
-make smoke-infra                                # 11 assertions
+Five services (3 Java + Spring Boot 4, 2 TypeScript + Node) talk to each other over three different "substrates":
 
-make build-services && make build-images && make load-images
-make deploy-services                            # Helm install all 5 + Istio routing
-make smoke-services
+| Substrate | What it is | Why canary is hard here |
+|---|---|---|
+| **HTTP** (via Istio) | Synchronous service-to-service calls | Easiest — request-level header routing |
+| **Kafka** (via Strimzi) | Async event streams | Consumers are pull-based; subsets need their own offset cursors |
+| **Restate** (durable workflows) | Long-running, exactly-once orchestration | Handlers are registered globally; can't accidentally cross subsets |
 
-make pre-warm                                   # optional: seeds consumer offsets to lag=0 for e2e suites
+A **single HTTP header** (`x-canary: true`) drives canary routing on **all three** substrates. The platform libraries propagate it automatically — application code never reads or writes the header.
 
-# Send a baseline (no header) order:
-node tools/traffic-cli/bin/traffic-cli order
+### Why does this exist?
 
-# Deploy a canary, send a flagged request, roll back:
-make canary-deploy SVC=payment-service TAG=dev
-node tools/traffic-cli/bin/traffic-cli order --canary
-make canary-status SVC=payment-service
-make canary-rollback SVC=payment-service
+Production canary tutorials usually stop at "Istio routes HTTP by header". Real systems are messier — they emit Kafka events, run durable sagas, and span multiple languages. This repo answers the harder question:
 
-# When done:
-make down                                       # destroys the cluster
+> *How do you canary a system where a single request fans out across HTTP, Kafka, and Restate — and still guarantee stable users are never affected?*
+
+It's an executable answer. You clone it, run `make up`, and watch flagged traffic flow through canary subsets at every hop while baseline traffic stays entirely on stable.
+
+---
+
+## 🖼️ The picture
+
+```mermaid
+graph LR
+    Client["Test client<br/>(traffic-cli)"]
+    Gateway["Istio Gateway"]
+
+    subgraph services["5 domain services"]
+        Order["order-service<br/>(Node)"]
+        Inv["inventory-service<br/>(Java)"]
+        Pay["payment-service<br/>(Java)"]
+        Notif["notification-service<br/>(Node)"]
+        Audit["audit-service<br/>(Java)"]
+    end
+
+    Kafka[("Kafka<br/>5 topics")]
+    Restate[("Restate<br/>durable saga")]
+
+    Client -- "x-canary: true | false" --> Gateway
+    Gateway --> Order
+    Order -- "Restate ingress" --> Restate
+    Restate -. dispatch .-> Order
+    Order --> Inv
+    Order --> Pay
+    Order --> Notif
+    Order --> Kafka
+    Pay --> Kafka
+    Inv --> Kafka
+    Notif --> Kafka
+    Kafka --> Audit
 ```
 
-## Documentation
+When a request arrives carrying `x-canary: true`:
 
-For a new developer, read in this order:
+- **Istio** routes the HTTP hop to the canary subset *if* one is deployed for that service; otherwise falls back to stable.
+- **Kafka** consumers in the canary subset use a *different consumer group* than stable — same topic, separate offset cursor.
+- **Restate** handlers are registered under variant-isolated service names (`*Stable` / `*Canary`), so a flagged saga can never call into stable handlers.
+- **Stable takes over** if canary becomes unhealthy (a presence-watch protocol flips a flag in stable pods within ~1s).
 
-| Document | What's in it |
+The mechanics live in [docs/canary-mechanics.md](docs/canary-mechanics.md). If you read one doc, read that one.
+
+---
+
+## 🚀 Try it on your laptop
+
+### Prerequisites
+
+Docker, `kind`, `kubectl`, `helm`, `istioctl` 1.29.2, JDK 25, Node 20+, pnpm 9.12.0, `bats`, `jq`. Full list with install commands in [docs/development.md#prerequisites](docs/development.md#prerequisites).
+
+### First 10 minutes
+
+```bash
+# 1. Install workspace deps (~30 sec)
+git clone <repo-url> && cd canary-release-mgmt
+pnpm install
+
+# 2. Verify your toolchain (~2 min, no cluster needed)
+make verify                 # ~118 unit tests across Java + Node
+
+# 3. Bring up the substrate (~4 min)
+make up                     # kind cluster + Istio + Kafka + Restate
+make smoke-infra            # 11 assertions
+
+# 4. Build + deploy services (~3 min)
+make build-services && make build-images && make load-images
+make deploy-services        # Helm install all 5 + Istio routing
+make smoke-services
+```
+
+### See a canary in action
+
+```bash
+# Baseline — no header. Saga runs through stable everywhere.
+node tools/traffic-cli/bin/traffic-cli order
+
+# Deploy a canary for payment-service
+make canary-deploy SVC=payment-service TAG=dev
+make canary-status SVC=payment-service
+
+# Flagged request — header set. Only payment-service goes canary.
+node tools/traffic-cli/bin/traffic-cli order --canary
+```
+
+The response includes an `x-served-chain` header showing which subset served each hop. The flagged response should read something like:
+
+```
+x-served-chain: order-service=stable, inventory-service=stable,
+                payment-service=canary, notification-service=stable
+```
+
+### Watch it visually
+
+```bash
+make dashboards             # background port-forwards
+make dashboards-status
+```
+
+| Dashboard | URL | What you'll see |
+|---|---|---|
+| **Kiali** | http://localhost:20001 | Live service graph — two edges from order-service → payment-service (stable + canary) with the traffic split |
+| **Grafana** | http://localhost:3000 | "Canary — Overview / Substrates / Traces" dashboards: lane-active matrix, error rate + p95 by service × lane |
+| **Jaeger** | http://localhost:16686 | Trace a flagged request end-to-end. Filter by tag `x-canary=true`. Each span shows `version=stable\|canary` |
+| **Prometheus** | http://localhost:9090 | Raw `canary_request_total`, `canary_request_duration_seconds`, `canary_lane_active` metrics |
+
+The full walkthrough — including a traffic-generator loop and a tour of each dashboard — is in [docs/onboarding.md#manual-dashboard-walkthrough](docs/onboarding.md#manual-dashboard-walkthrough).
+
+### Clean up
+
+```bash
+make canary-rollback SVC=payment-service
+make undeploy-services      # keeps the cluster
+make down                   # destroys the kind cluster
+```
+
+---
+
+## 📚 Documentation
+
+The docs are layered so you can stop reading at any depth that's enough for your task.
+
+| Doc | Read it when… |
 |---|---|
-| [docs/onboarding.md](docs/onboarding.md) | **Start here.** Mental model, first-30-minutes commands, dashboard walkthrough |
-| [docs/architecture.md](docs/architecture.md) | System map, the 5 services, repo layout, lib-java vs lib-node primitives |
-| [docs/canary-mechanics.md](docs/canary-mechanics.md) | How `x-canary` propagates, per-subset Kafka groups, presence-watch protocol, `canary-ctl` lifecycle |
-| [docs/development.md](docs/development.md) | Prereqs, build, test, run a service in isolation, env vars, Spring Boot 4 quirks |
-| [docs/operations.md](docs/operations.md) | Cold-cluster bring-up, dashboards, e2e scenarios (S1–S13 + K1–K5), troubleshooting, known issues |
-| [docs/history.md](docs/history.md) | Phase-by-phase implementation log + post-merge fixes |
-| [docs/superpowers/specs/](docs/superpowers/specs/) | Design specs (one per phase / sub-phase) |
-| [docs/superpowers/plans/](docs/superpowers/plans/) | Implementation plans (one per phase / sub-phase) |
+| **[docs/onboarding.md](docs/onboarding.md)** ⭐ | **Start here.** First 30 minutes hands-on + dashboard walkthrough |
+| **[docs/canary-mechanics.md](docs/canary-mechanics.md)** ⭐ | You want to understand *how* the header flows and why it's safe |
+| [docs/architecture.md](docs/architecture.md) | You want the system map, per-service stack, and substrate versions |
+| [docs/development.md](docs/development.md) | You're setting up your local toolchain or running a service in isolation |
+| [docs/operations.md](docs/operations.md) | You're bringing up the cluster, running e2e suites, troubleshooting |
+| [docs/known_issues.md](docs/known_issues.md) | Something's broken and you want to check whether it's a known one |
+| [docs/runbooks/](docs/runbooks/) | A dashboard is showing red — pick the matching runbook |
+| [docs/history.md](docs/history.md) | You want the phase-by-phase implementation log + rationale |
+| [docs/superpowers/specs/](docs/superpowers/specs/) + [plans/](docs/superpowers/plans/) | You want the original design specs and implementation plans |
 
-If you only have time for one: **[docs/canary-mechanics.md](docs/canary-mechanics.md)** —
-that's where the interesting bits live.
+---
 
-## What's in the box
+## 🗂️ Repo layout
 
 ```
 canary-release-mgmt/
 ├── Makefile                  # primary entrypoint — every workflow has a target
 ├── deploy/                   # kind, Helm chart + values, Istio routing, KafkaTopics
 ├── platform/
-│   ├── lib-java/             # Spring Boot 4 starter — filters, interceptors, watchers, health
-│   ├── lib-node/             # TS package — middleware, axios + KafkaJS interceptors
-│   └── restate-defs-{java,node}/  # cross-service Restate type contracts
+│   ├── lib-java/             # Spring Boot 4 starter — filters, interceptors, watchers
+│   ├── lib-node/             # TS package — Express middleware, axios + KafkaJS interceptors
+│   └── restate-defs-{java,node}/   # cross-service Restate type contracts
 ├── services/                 # 5 domain services (3 Java + 2 Node)
+│   ├── order-service         # Node — orchestrator entrypoint
+│   ├── inventory-service     # Java
+│   ├── payment-service       # Java
+│   ├── notification-service  # Node
+│   └── audit-service         # Java — consumes every *.events topic
 ├── tools/
 │   ├── canary-ctl/           # per-service canary lifecycle CLI
 │   └── traffic-cli/          # send a single /api/orders POST with/without x-canary
 ├── tests/
 │   ├── infra/ services/ canary/   # bats smoke tests
 │   └── e2e/                       # 13 HTTP + 6 Kafka + 7 Restate + 1 observability scenarios (vitest)
-└── docs/                     # architecture, mechanics, development, operations, history, runbooks
+└── docs/                     # everything above
 ```
 
-## Common workflows
+**Where do I make a change?**
+
+| Intent | Place |
+|---|---|
+| Change domain behavior | `services/<svc>/` |
+| Change `x-canary` propagation | `platform/lib-{java,node}/` |
+| Add/change a Restate contract (`*Stable` / `*Canary` split) | `platform/restate-defs-{java,node}/` |
+| Change deployment shape | `deploy/helm/` |
+| Change Istio routing | `deploy/routing/` |
+| Change canary lifecycle | `tools/canary-ctl/` |
+| Change test coverage | `tests/{e2e,infra,services,canary}/` |
+
+---
+
+## 🛠️ Common workflows
 
 | Goal | Command |
 |---|---|
-| Set up a fresh laptop | `pnpm install && make verify` |
+| Fresh-laptop setup | `pnpm install && make verify` |
 | Bring up the substrate | `make up && make smoke-infra` |
 | Build + deploy all services | `make build-services && make build-images && make load-images && make deploy-services` |
 | Run all unit tests | `make verify` |
@@ -105,70 +221,69 @@ canary-release-mgmt/
 | Inspect canary state | `make canary-status SVC=<svc>` |
 | Roll a canary back | `make canary-rollback SVC=<svc>` |
 | Repair canary drift | `make canary-reconcile SVC=<svc>` |
-| Open observability dashboards | `make dashboards` (Kiali / Grafana / Prometheus / Jaeger) |
-| View canary dashboards | Grafana → "Canary — Overview / Substrates / Traces" (UIDs `canary-overview`, `canary-substrates`, `canary-traces`) |
+| Open dashboards | `make dashboards` |
 | Tear down | `make down` |
 
 `make help` lists every target.
 
-## Substrate versions
+---
+
+## ✅ What's shipped
+
+| Phase | Scope | Status |
+|---|---|---|
+| **Phase 1** | HTTP canary (Istio header routing, propagation, presence-watch) | ✅ Merged |
+| **Phase 2** | Kafka canary (per-subset consumer groups, graceful fallback) | ✅ Merged |
+| **Phase 2.c** | Kafka schema evolution | ⏸ Deferred |
+| **Phase 3** | Restate canary (β routing with `*Stable` / `*Canary` variant isolation) | ✅ Merged |
+| **Phase 4** | CI/CD + percent-split + Argo Rollouts | ⏸ Deferred |
+| **Phase 5** | Observability (lane-aware metrics, OTel tracing, Grafana dashboards, runbooks) | ✅ Merged |
+
+See [docs/history.md](docs/history.md) for the deferral rationale and per-phase implementation log.
+
+---
+
+## ⚠️ Known issues
+
+Three notable gaps to be aware of:
+
+- **K1 e2e saga timeout** — K1's flagged-saga path hangs past 5 minutes on a real cluster; unit tests still pass. Deferred Phase 2 follow-up.
+- **No automatic stable-takeover for Restate** — When canary is unhealthy, flagged Restate calls still hit `*Canary` handlers and surface as HTTP 502/503 (deliberate asymmetry with Phase 2's Kafka graceful fallback).
+- **Phase 2.c and Phase 4 are out of scope today** — Schema evolution + percent-split routing intentionally deferred.
+
+Details, mitigations, and an updated list live in [docs/known_issues.md](docs/known_issues.md).
+
+---
+
+## 🔢 Substrate versions
 
 Pinned at the top of [Makefile](Makefile):
 
-- Istio 1.29.2
-- Strimzi 0.45.2 (Kafka via the Strimzi operator)
-- Restate 1.6.2 (server) — wire-compatible with Java SDK 2.7.0 + Node SDK 1.14.2
-- Spring Boot 4.0.4 / JDK 25
-- pnpm 9.12.0 / Node 20+
+- Istio **1.29.2**
+- Strimzi **0.45.2** (Kafka via the Strimzi operator)
+- Restate **1.6.2** (server) — wire-compatible with Java SDK 2.7.0 + Node SDK 1.14.2
+- Spring Boot **4.0.4** / **JDK 25**
+- pnpm **9.12.0** / Node **20+**
 
 Don't bump the Restate server pin without testing both SDKs.
 
-## Known issues
+---
 
-- **K1 e2e saga timeout (deferred).** K1's flagged-saga path hangs past 5
-  min on a real cluster; unit tests still pass. Tracked as a Phase 2
-  follow-up — see [docs/operations.md#known-issues](docs/operations.md#known-issues).
-- **Phase 3.b — no automatic stable-takes-over for Restate.** When canary
-  is unhealthy, flagged requests still POST to `*Canary` and surface as
-  HTTP 502/503 (deliberate asymmetry with Phase 2's Kafka graceful
-  fallback). Operational mitigation + teardown runbook live in
-  [docs/operations.md](docs/operations.md#phase-3b-trade-offs--operational-notes).
-- **Phase 2.c and Phase 4 deferred.** Schema evolution and CI/CD +
-  percent-split routing are out of scope today. See
-  [docs/history.md](docs/history.md) for the deferral rationale.
+## 🤝 Contributing
 
-## Observability (Phase 5)
-
-Three canary-aware Grafana dashboards ship with the substrate
-(installed by `deploy/kind/observability/install.sh` via the Grafana
-sidecar ConfigMap):
-
-| Dashboard | UID | What it shows |
-|---|---|---|
-| Canary — Overview | `canary-overview` | Lane-active matrix, error rate + p95 latency by service × lane |
-| Canary — Substrates | `canary-substrates` | Per-substrate (http / kafka / restate) request rate, error rate, duration heatmap, top-10 slowest targets |
-| Canary — Traces | `canary-traces` | Jaeger trace search filtered by `service` + `lane` |
-
-Metrics emitted by `platform/lib-{java,node}/observability`:
-`canary_request_total`, `canary_request_duration_seconds`,
-`canary_lane_active` (gauge tagged by service + substrate + lane).
-OTel tracing is wired end-to-end with the `canary.lane` span attribute.
-Four runbooks under [docs/runbooks/](docs/runbooks/) cover the
-common incident classes the dashboards surface.
-
-## Contributing
-
-The conventional flow is:
-
-1. Read [docs/development.md](docs/development.md) for environment setup
-   and the Spring Boot 4 quirks.
+1. Read [docs/development.md](docs/development.md) for environment setup and Spring Boot 4 quirks.
 2. Make the change. `make verify` should pass.
-3. If you touched the Helm chart, deploy scripts, or the canary lifecycle,
-   run `make smoke-canary` and at least `make ci-local`.
-4. If you touched anything in the Kafka path, eyeball
-   `kubectl -n kafka exec my-cluster-kafka-0 -- bin/kafka-consumer-groups.sh
-   --bootstrap-server localhost:9092 --list` to confirm the expected groups
-   appear.
+3. If you touched the Helm chart, deploy scripts, or the canary lifecycle, run `make smoke-canary` and at least `make ci-local`.
+4. If you touched anything in the Kafka path, eyeball:
+
+   ```bash
+   kubectl -n kafka exec my-cluster-kafka-0 -- \
+     bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --list
+   ```
+
+   to confirm the expected `<svc>-stable` / `<svc>-canary` groups appear.
+
+---
 
 ## License
 
