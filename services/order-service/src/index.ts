@@ -50,6 +50,7 @@ const server = app.listen(config.HTTP_PORT, () => {
 await setupRestate({
   registerHandlers: config.RESTATE_REGISTER_HANDLERS,
   port: config.RESTATE_HANDLER_PORT,
+  metrics,
 });
 
 const shutdown = async () => {
