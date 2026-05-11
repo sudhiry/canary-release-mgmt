@@ -4,13 +4,11 @@
 
 ---
 
-## 🧭 New here? Read this first
-
-### What is a "canary release"?
+## What is a "canary release"?
 
 A canary release is when you deploy a new version of a service *alongside* the existing stable version, send a small slice of traffic to it, watch how it behaves, and either promote it or roll it back. The risky new code only sees the canary slice — stable users never get touched.
 
-### What does this project do?
+## What does this project do?
 
 It shows — concretely, end-to-end, on a single developer machine — **how to canary a polyglot, event-driven, durably-orchestrated microservice system without harming stable releases**.
 
@@ -24,7 +22,7 @@ Five services (3 Java + Spring Boot 4, 2 TypeScript + Node) talk to each other o
 
 A **single HTTP header** (`x-canary: true`) drives canary routing on **all three** substrates. The platform libraries propagate it automatically — application code never reads or writes the header.
 
-### Why does this exist?
+## Why does this exist?
 
 Production canary tutorials usually stop at "Istio routes HTTP by header". Real systems are messier — they emit Kafka events, run durable sagas, and span multiple languages. This repo answers the harder question:
 
@@ -34,7 +32,7 @@ It's an executable answer. You clone it, run `make up`, and watch flagged traffi
 
 ---
 
-## 🖼️ The picture
+## High level Architecture
 
 ```mermaid
 graph LR
