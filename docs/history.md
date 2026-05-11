@@ -1,11 +1,11 @@
 # Phase-by-phase implementation history
 
-Project context for what shipped when and why. Each phase has a paired
-spec under [`superpowers/specs/`](superpowers/specs/) and an
-implementation plan under [`superpowers/plans/`](superpowers/plans/).
-Newer developers should read [architecture.md](architecture.md) and
-[canary-mechanics.md](canary-mechanics.md) first; this document is for
-"why is X the way it is?"
+Project context for what shipped when. Newer developers should read
+[architecture.md](architecture.md) and [canary-mechanics.md](canary-mechanics.md)
+first for the system map + how it works; this document is for *when*
+each piece landed. For the *why* behind the architectural choices
+(alternatives considered, trade-offs accepted), see
+[design-decisions.md](design-decisions.md).
 
 ## Phase 1 — Substrate + HTTP canary
 
@@ -232,7 +232,8 @@ all 6 expected consumer groups appear in `kafka-consumer-groups.sh
   poll-receipt timeout). K5 detection is now ~31s end-to-end (was ~46s).
   `make pre-warm` is kept as an optional e2e helper. Stable readiness
   unchanged. Old env-var/property names accepted as deprecated aliases.
-  Spec: `docs/superpowers/specs/2026-05-10-canary-cold-cluster-prewarm-fix-design.md`.
+  Rationale for the new probe shape lives in
+  [design-decisions.md](design-decisions.md#heartbeat-fresh-readiness-signal-over-first-poll).
 
 #### Open finding (deferred): K1 e2e saga timeout
 

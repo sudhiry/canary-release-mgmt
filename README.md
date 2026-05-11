@@ -163,8 +163,8 @@ The docs are layered so you can stop reading at any depth that's enough for your
 | [docs/operations.md](docs/operations.md) | You're bringing up the cluster, running e2e suites, troubleshooting |
 | [docs/known_issues.md](docs/known_issues.md) | Something's broken and you want to check whether it's a known one |
 | [docs/runbooks/](docs/runbooks/) | A dashboard is showing red — pick the matching runbook |
-| [docs/history.md](docs/history.md) | You want the phase-by-phase implementation log + rationale |
-| [docs/superpowers/specs/](docs/superpowers/specs/) + [plans/](docs/superpowers/plans/) | You want the original design specs and implementation plans |
+| [docs/history.md](docs/history.md) | You want the phase-by-phase implementation log of what shipped when |
+| [docs/design-decisions.md](docs/design-decisions.md) | You want the *why* — alternatives considered, trade-offs accepted, deferred-phase rationale |
 
 ---
 

@@ -359,8 +359,8 @@ make down               # destroy the cluster (optional)
 | Understand `x-canary` propagation in depth | [canary-mechanics.md](canary-mechanics.md) |
 | Set up your local toolchain / Spring Boot 4 quirks | [development.md](development.md) |
 | Deploy, troubleshoot, run e2e scenarios | [operations.md](operations.md) |
-| See what shipped in each phase and why | [history.md](history.md) |
-| Read the design + plan for a specific phase | [docs/superpowers/{specs,plans}/](superpowers/) |
+| See what shipped in each phase | [history.md](history.md) |
+| Understand *why* each architectural choice was made | [design-decisions.md](design-decisions.md) |
 
 When you're ready to contribute, [the README](../README.md#contributing)
 has the conventional flow (it's short — basically: change → `make verify`

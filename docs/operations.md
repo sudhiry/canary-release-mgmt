@@ -432,20 +432,72 @@ cost of choosing β over α, not a bug.
 
 ### Canary teardown runbook (β routing)
 
-Canary teardown in β has only two drain modes:
+Recovery in β is limited to **drain-and-remove**, with
+`restate invocations cancel` as the only escape hatch for stuck work.
+Pause-resume is not available — see the rationale above.
 
-- **Graceful** — `restate deployment describe <canary-id> --extra`,
-  wait for in-flight count to reach 0 (worst case ~120s per parked
-  reservation workflow), then `restate deployments remove <canary-id>`
-  and `helm uninstall <release>`. `canary-ctl rollback` follows this
-  path with a `--grace-seconds` (default 10) drain window.
-- **Emergency** — `restate invocations cancel <id>` for each in-flight,
-  then `restate deployments remove <canary-id> --force`. The current
-  sagas don't handle cancellation explicitly, so durable side effects
-  (charges, reservations) may be left mid-state and require manual
-  reconciliation via the per-service admin endpoints.
+#### Procedure
 
-Full decision flow + explicit Restate CLI commands: see the Phase 3.b
-spec at
-`docs/superpowers/specs/2026-05-11-canary-release-phase-3-b-canary-handler-versioning-design.md`,
-section "Operational runbook (canary teardown)".
+1. **Stop new flagged traffic.** Edit the Istio VirtualService route to
+   100% stable subset, or remove the canary subset rule. New
+   `x-canary: true` requests now hit the stable saga.
+
+2. **Inventory in-flight `*Canary` invocations:**
+
+   ```
+   restate deployment describe <canary-deployment-id> --extra
+   ```
+
+3. **Drain — choose mode:**
+
+   **(a) Graceful (preferred when latency budget allows).** Let
+   in-flights finish naturally. `ReservationWorkflowCanary.run` parks
+   on a 120s timer, so worst-case wait per saga is ~2 minutes. Watch:
+
+   ```
+   watch restate deployment describe <canary-deployment-id> --extra
+   ```
+
+   Wait until the in-flight count is 0. `canary-ctl rollback` follows
+   this path with a `--grace-seconds` (default 10) drain window.
+
+   **(b) Emergency (when canary pods are gone or the deployment is
+   genuinely buggy).** Cancel each in-flight invocation:
+
+   ```
+   for id in $(restate invocations list --deployment <canary-deployment-id> --json | jq -r '.[].id'); do
+     restate invocations cancel "$id"
+   done
+   ```
+
+   Cancellation triggers Restate's compensation path **only if the saga
+   catches the cancellation signal** — the current Phase 3.b sagas do
+   not handle cancellation explicitly, so durable side effects (Charges
+   in `succeeded` state, Reservations in `reserved` state) may be left
+   mid-flight. Operators must manually reconcile via the per-service
+   admin endpoints (`POST /api/orders/<id>/refund`,
+   `POST /api/reservations/<id>/release`, etc.) if applicable.
+
+   *Pause-resume is not an option.* If a future operator runs
+   `restate invocations resume <id> --deployment <stable-deployment-id>`,
+   Restate will refuse — the stable deployment doesn't expose
+   `CheckoutSagaCanary`. This is by design.
+
+4. **Deregister the canary deployment from Restate:**
+
+   ```
+   restate deployments remove <canary-deployment-id>
+   ```
+
+   Add `--force` only if step 3 used emergency mode and you've already
+   accepted the partial-state cost.
+
+5. **Tear down the K8s release:**
+
+   ```
+   helm uninstall <canary-release> -n services
+   ```
+
+Skipping step 3 leaves Restate retrying dead URLs indefinitely.
+Skipping step 4 means future canary installs that re-register at the
+same URL will collide.

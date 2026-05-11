@@ -400,8 +400,10 @@ observable to the client (unlike Phase 2's Kafka black-hole risk that
 made fallback essential).
 
 For the full operational runbook (graceful vs emergency canary
-teardown, Restate CLI commands), see the Phase 3.b spec at
-[`docs/superpowers/specs/2026-05-11-canary-release-phase-3-b-canary-handler-versioning-design.md`](superpowers/specs/2026-05-11-canary-release-phase-3-b-canary-handler-versioning-design.md).
+teardown, Restate CLI commands), see
+[operations.md — Canary teardown runbook (β routing)](operations.md#canary-teardown-runbook-β-routing).
+For the *why* behind choosing β over α, see
+[design-decisions.md — Restate canary routing](design-decisions.md#restate-canary-routing-phase-3b).
 
 ## The `canary-ctl` lifecycle
 

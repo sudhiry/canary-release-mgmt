@@ -211,8 +211,9 @@ canary-release-mgmt/
     ├── operations.md         # deploy / canary lifecycle / troubleshooting
     ├── onboarding.md         # 30-minute new-developer walkthrough
     ├── history.md            # phase-by-phase implementation log
-    ├── runbooks/             # Phase 5.d incident runbooks (burning budget, lane drift, lane stuck, restate failure)
-    └── superpowers/          # design specs and implementation plans (one per phase/subphase)
+    ├── design-decisions.md   # why each architectural choice was made (alternatives considered, trade-offs)
+    ├── known_issues.md       # current gaps and their mitigations
+    └── runbooks/             # Phase 5.d incident runbooks (burning budget, lane drift, lane stuck, restate failure)
 ```
 
 ## The two platform libraries
