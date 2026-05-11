@@ -161,14 +161,16 @@ describe("HTTP routes", () => {
     });
     const app = setupHttp({ ingressClient });
 
-    await request(app)
+    const res = await request(app)
       .post("/api/orders")
       .set("x-canary", "true")
       .send({ userId: "u_1", sku: "widget", quantity: 1, amount: 100 });
 
+    expect(res.status).toBe(201);
+    expect(res.body.auditTrail).toContain("saga@canary");
     expect(ingressClient.post).toHaveBeenCalledOnce();
     const [url] = (ingressClient.post as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(url).toMatch(/^\/CheckoutSagaCanary\//);
+    expect(url).toMatch(/^\/CheckoutSagaCanary\/[0-9a-f-]+\/run$/);
   });
 
   it("posts to /CheckoutSagaStable when x-canary absent", async () => {
@@ -188,13 +190,15 @@ describe("HTTP routes", () => {
     });
     const app = setupHttp({ ingressClient });
 
-    await request(app)
+    const res = await request(app)
       .post("/api/orders")
       .send({ userId: "u_1", sku: "widget", quantity: 1, amount: 100 });
 
+    expect(res.status).toBe(201);
+    expect(res.body.auditTrail).toContain("saga@stable");
     expect(ingressClient.post).toHaveBeenCalledOnce();
     const [url] = (ingressClient.post as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(url).toMatch(/^\/CheckoutSagaStable\//);
+    expect(url).toMatch(/^\/CheckoutSagaStable\/[0-9a-f-]+\/run$/);
   });
 
   it("posts to /CheckoutSagaStable when x-canary is 'false'", async () => {
@@ -214,14 +218,16 @@ describe("HTTP routes", () => {
     });
     const app = setupHttp({ ingressClient });
 
-    await request(app)
+    const res = await request(app)
       .post("/api/orders")
       .set("x-canary", "false")
       .send({ userId: "u_1", sku: "widget", quantity: 1, amount: 100 });
 
+    expect(res.status).toBe(201);
+    expect(res.body.auditTrail).toContain("saga@stable");
     expect(ingressClient.post).toHaveBeenCalledOnce();
     const [url] = (ingressClient.post as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(url).toMatch(/^\/CheckoutSagaStable\//);
+    expect(url).toMatch(/^\/CheckoutSagaStable\/[0-9a-f-]+\/run$/);
   });
 
   it("GET /health returns 200 with {ok: true}", async () => {

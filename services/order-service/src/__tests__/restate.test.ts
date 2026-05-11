@@ -201,24 +201,55 @@ describe("CheckoutSaga.run real saga", () => {
       userId: "u_1", sku: "widget", quantity: 1, amount: 100,
     });
 
-    // Each R-to-R call should have received an opts arg with x-canary header.
-    // We verify the mock was called with at least one extra argument (the opts wrapper).
     expect(ctx._mocks.reservationSend.run).toHaveBeenCalledOnce();
     expect(ctx._mocks.payment.charge).toHaveBeenCalledOnce();
     expect(ctx._mocks.reservation.confirm).toHaveBeenCalledOnce();
     expect(ctx._mocks.notification.notify).toHaveBeenCalledOnce();
 
-    // The opts is the second positional arg for handlers that take a request (charge/notify/run)
-    // and the first arg for handlers that take no request (confirm/release).
-    const reservationSendArgs = ctx._mocks.reservationSend.run.mock.calls[0];
-    const chargeArgs = ctx._mocks.payment.charge.mock.calls[0];
-    const confirmArgs = ctx._mocks.reservation.confirm.mock.calls[0];
-    const notifyArgs = ctx._mocks.notification.notify.mock.calls[0];
+    // opts arrives wrapped in restate.rpc.opts(...)/sendOpts(...) — call .getOpts()
+    // to recover the ClientCallOptions / ClientSendOptions that flowed through
+    // applyXCanaryToRestateOptions. The headers field is what gets sent on the wire.
+    const headersFor = (call: unknown[], optsIdx: number): Record<string, string> => {
+      const wrapped = call[optsIdx] as { getOpts: () => { headers?: Record<string, string> } };
+      return wrapped.getOpts().headers ?? {};
+    };
 
-    // Each call passes some opts value (truthy object) — proves opts is wired.
-    expect(reservationSendArgs.length).toBeGreaterThanOrEqual(2);
-    expect(chargeArgs.length).toBeGreaterThanOrEqual(2);
-    expect(confirmArgs.length).toBeGreaterThanOrEqual(1);
-    expect(notifyArgs.length).toBeGreaterThanOrEqual(2);
+    // reservationSend.run is invoked as (request, sendOpts)
+    expect(headersFor(ctx._mocks.reservationSend.run.mock.calls[0], 1))
+      .toMatchObject({ "x-canary": "true" });
+    // payment.charge is invoked as (request, opts)
+    expect(headersFor(ctx._mocks.payment.charge.mock.calls[0], 1))
+      .toMatchObject({ "x-canary": "true" });
+    // reservation.confirm is invoked as (opts) — no request body
+    expect(headersFor(ctx._mocks.reservation.confirm.mock.calls[0], 0))
+      .toMatchObject({ "x-canary": "true" });
+    // notification.notify is invoked as (request, opts)
+    expect(headersFor(ctx._mocks.notification.notify.mock.calls[0], 1))
+      .toMatchObject({ "x-canary": "true" });
+  });
+
+  it("xCanaryHeaderAbsentOnRtoRCallsWhenStable", async () => {
+    // Regression guard: under stable ctx, applyXCanaryToRestateOptions must NOT
+    // stamp x-canary on downstream R-to-R calls (otherwise stable would route to
+    // canary subsets, defeating subset isolation).
+    const ctx = buildCtx({ canary: false });
+
+    await checkoutSagaRunHandler(ctx, {
+      userId: "u_1", sku: "widget", quantity: 1, amount: 100,
+    });
+
+    const headersFor = (call: unknown[], optsIdx: number): Record<string, string> => {
+      const wrapped = call[optsIdx] as { getOpts: () => { headers?: Record<string, string> } };
+      return wrapped.getOpts().headers ?? {};
+    };
+
+    expect(headersFor(ctx._mocks.reservationSend.run.mock.calls[0], 1))
+      .not.toHaveProperty("x-canary");
+    expect(headersFor(ctx._mocks.payment.charge.mock.calls[0], 1))
+      .not.toHaveProperty("x-canary");
+    expect(headersFor(ctx._mocks.reservation.confirm.mock.calls[0], 0))
+      .not.toHaveProperty("x-canary");
+    expect(headersFor(ctx._mocks.notification.notify.mock.calls[0], 1))
+      .not.toHaveProperty("x-canary");
   });
 });
