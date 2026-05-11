@@ -2,7 +2,6 @@ import "./tracing.js";   // MUST be first — initializes OTel SDK before expres
 import { loadConfig } from "./config.js";
 import {
   CanaryMetrics,
-  canaryHttpMetricsMiddleware,
   canaryMetricsEndpoint,
   LaneStateProbe,
 } from "@canary/lib-node";
@@ -34,8 +33,8 @@ const app = setupHttp({
   ingressClient,
   kafkaHealth: kafka.health,
   version: process.env.VERSION ?? "stable",
+  metrics,
 });
-app.use(canaryHttpMetricsMiddleware(metrics));
 app.get("/actuator/prometheus", canaryMetricsEndpoint(metrics));
 
 const server = app.listen(config.HTTP_PORT, () => {

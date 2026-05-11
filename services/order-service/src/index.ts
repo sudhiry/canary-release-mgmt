@@ -4,7 +4,6 @@ import {
   attachXCanaryAxiosInterceptor,
   attachXServedChainAxiosInterceptor,
   CanaryMetrics,
-  canaryHttpMetricsMiddleware,
   canaryMetricsEndpoint,
   LaneStateProbe,
 } from "@canary/lib-node";
@@ -40,8 +39,8 @@ const app = setupHttp({
   kafkaSend: kafka.send,
   kafkaHealth: kafka.health,
   version: process.env.VERSION ?? "stable",
+  metrics,
 });
-app.use(canaryHttpMetricsMiddleware(metrics));
 app.get("/actuator/prometheus", canaryMetricsEndpoint(metrics));
 
 const server = app.listen(config.HTTP_PORT, () => {

@@ -3,6 +3,7 @@ import request from "supertest";
 import type { AxiosInstance } from "axios";
 import { setupHttp } from "../http.js";
 import { orderStore } from "../store.js";
+import type { CanaryMetrics } from "@canary/lib-node";
 
 /**
  * Build a minimal AxiosInstance-shaped stub. http.ts only uses `post<T>(url, body)`,
@@ -262,5 +263,35 @@ describe("HTTP routes", () => {
     });
     const res = await request(app).get("/health");
     expect(res.status).toBe(200);
+  });
+
+  it("metrics middleware fires for real routes when metrics passed into setupHttp", async () => {
+    // Regression test: canaryHttpMetricsMiddleware must be wired BEFORE routes
+    // so it intercepts API calls, not just /actuator/prometheus.
+    // Use a stub to avoid prom-client duplicate-registration issues across test runs.
+    const recordHttp = vi.fn();
+    const metrics = { recordHttp } as unknown as CanaryMetrics;
+
+    const ingressClient = makeIngressClient(async (url) => {
+      const orderId = url.split("/")[2];
+      return {
+        data: {
+          id: orderId, userId: "u_1", sku: "widget",
+          quantity: 1, amount: 100, status: "completed", auditTrail: [],
+        },
+      };
+    });
+
+    const app = setupHttp({ ingressClient, metrics });
+
+    await request(app)
+      .post("/api/orders")
+      .send({ userId: "u_1", sku: "widget", quantity: 1, amount: 100 });
+
+    // recordHttp must have been called — proves middleware ran for a real route
+    expect(recordHttp).toHaveBeenCalledOnce();
+    const [target, outcome] = (recordHttp as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(target).toContain("/api/orders");
+    expect(outcome).toBe("success");
   });
 });
