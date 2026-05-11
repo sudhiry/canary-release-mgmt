@@ -126,6 +126,19 @@ class XCanaryAutoConfigurationTest {
     }
 
     @Test
+    void kafkaListenerContainerFactoryHasObservationEnabled() {
+        runner
+            .withBean(MeterRegistry.class, SimpleMeterRegistry::new)
+            .withPropertyValues("canary.service-name=payment", "canary.presence-watcher.enabled=false")
+            .run(ctx -> {
+                ConcurrentKafkaListenerContainerFactory<?, ?> factory = ctx.getBean(
+                        "kafkaListenerContainerFactory",
+                        ConcurrentKafkaListenerContainerFactory.class);
+                assertThat(factory.getContainerProperties().isObservationEnabled()).isTrue();
+            });
+    }
+
+    @Test
     void kafkaListenerContainerFactoryHasCanaryRecordInterceptor() {
         runner
             .withBean(MeterRegistry.class, SimpleMeterRegistry::new)

@@ -30,6 +30,8 @@ public class KafkaProducerConfig {
 
     @Bean
     public KafkaTemplate<String, String> kafkaTemplate(ProducerFactory<String, String> pf) {
-        return new KafkaTemplate<>(pf);
+        KafkaTemplate<String, String> template = new KafkaTemplate<>(pf);
+        template.setObservationEnabled(true);
+        return template;
     }
 }
