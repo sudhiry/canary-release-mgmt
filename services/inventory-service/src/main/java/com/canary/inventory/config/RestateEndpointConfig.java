@@ -4,6 +4,7 @@ import com.canary.inventory.handler.ReservationWorkflowImplStable;
 import com.canary.inventory.handler.ReservationWorkflowImplCanary;
 import com.canary.inventory.store.ReservationStore;
 import com.canary.platform.lib.XCanaryRestateClientCustomizer;
+import com.canary.platform.lib.observability.CanaryRestateMeter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.restate.sdk.endpoint.Endpoint;
 import dev.restate.sdk.http.vertx.RestateHttpServer;
@@ -57,8 +58,9 @@ public class RestateEndpointConfig {
             ReservationStore store,
             XCanaryRestateClientCustomizer canary,
             KafkaTemplate<String, String> kafkaTemplate,
-            ObjectMapper objectMapper) {
-        return new ReservationWorkflowImplStable(store, canary, kafkaTemplate, objectMapper);
+            ObjectMapper objectMapper,
+            CanaryRestateMeter meter) {
+        return new ReservationWorkflowImplStable(store, canary, kafkaTemplate, objectMapper, meter);
     }
 
     @Bean
@@ -67,8 +69,9 @@ public class RestateEndpointConfig {
             ReservationStore store,
             XCanaryRestateClientCustomizer canary,
             KafkaTemplate<String, String> kafkaTemplate,
-            ObjectMapper objectMapper) {
-        return new ReservationWorkflowImplCanary(store, canary, kafkaTemplate, objectMapper);
+            ObjectMapper objectMapper,
+            CanaryRestateMeter meter) {
+        return new ReservationWorkflowImplCanary(store, canary, kafkaTemplate, objectMapper, meter);
     }
 
     @PostConstruct

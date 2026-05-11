@@ -4,7 +4,10 @@ import com.canary.inventory.handler.ReservationWorkflowImplCanary;
 import com.canary.inventory.handler.ReservationWorkflowImplStable;
 import com.canary.inventory.store.ReservationStore;
 import com.canary.platform.lib.XCanaryRestateClientCustomizer;
+import com.canary.platform.lib.observability.CanaryMetrics;
+import com.canary.platform.lib.observability.CanaryRestateMeter;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -82,6 +85,11 @@ class RestateEndpointGatingTest {
         @Bean
         ObjectMapper objectMapper() {
             return new ObjectMapper();
+        }
+
+        @Bean
+        CanaryRestateMeter canaryRestateMeter() {
+            return new CanaryRestateMeter(new CanaryMetrics(new SimpleMeterRegistry(), "inventory"));
         }
     }
 }
