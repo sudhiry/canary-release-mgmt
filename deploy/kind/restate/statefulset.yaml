@@ -22,11 +22,14 @@ spec:
             - --node-name
             - restate-0
           env:
-            # RESTATE_TRACING_ENDPOINT is intentionally omitted: 1.6.x panics on
-            # an empty-string URI (regression vs 1.1.x). Omitting it disables
-            # tracing export without error.
+            # Phase 5.b enables tracing export. The 1.6.x empty-string panic
+            # documented previously is avoided by setting a real endpoint.
             - name: RUST_LOG
               value: info
+            - name: RESTATE_TRACING_ENDPOINT
+              value: "http://jaeger-collector.istio-system:4317"
+            - name: RESTATE_TRACING_FILTER
+              value: "info,restate=info"
           ports:
             - name: ingress
               containerPort: 8080
