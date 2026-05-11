@@ -1,0 +1,17 @@
+# Reference only. install.sh regenerates this ConfigMap on every install
+# from the JSON files in deploy/kind/observability/dashboards/. Hand-edit
+# the JSONs, never this file.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: canary-dashboards
+  namespace: istio-system
+  labels:
+    grafana_dashboard: "1"
+data:
+  canary-overview.json: |
+    # contents of dashboards/canary-overview.json — see source file
+  canary-substrates.json: |
+    # contents of dashboards/canary-substrates.json — see source file
+  canary-traces.json: |
+    # contents of dashboards/canary-traces.json — see source file
