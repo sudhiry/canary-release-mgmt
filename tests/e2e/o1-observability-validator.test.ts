@@ -84,6 +84,12 @@ describe("O1 — observability validator", () => {
       expect(r.data.result.length).toBeGreaterThan(0);
     });
 
+    it("prometheus has canary_request_duration_seconds histogram with lane=canary samples", async () => {
+      const r = await queryPrometheus(prom.localPort, 'canary_request_duration_seconds_bucket{lane="canary"}');
+      expect(r.status).toBe("success");
+      expect(r.data.result.length).toBeGreaterThan(0);
+    });
+
     it("prometheus has canary_lane_active gauge series", async () => {
       const r = await queryPrometheus(prom.localPort, 'canary_lane_active');
       expect(r.status).toBe("success");
