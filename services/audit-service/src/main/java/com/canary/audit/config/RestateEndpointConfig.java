@@ -2,6 +2,7 @@ package com.canary.audit.config;
 
 import com.canary.audit.handler.AuditQueryServiceImpl;
 import com.canary.audit.store.AuditEventStore;
+import com.canary.platform.lib.observability.CanaryRestateMeter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.restate.sdk.endpoint.Endpoint;
 import dev.restate.sdk.http.vertx.RestateHttpServer;
@@ -36,9 +37,10 @@ public class RestateEndpointConfig {
     public static AuditQueryServiceImpl auditQueryServiceImpl(
             AuditEventStore store,
             KafkaTemplate<String, String> kafkaTemplate,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            CanaryRestateMeter meter
     ) {
-        return new AuditQueryServiceImpl(store, kafkaTemplate, objectMapper);
+        return new AuditQueryServiceImpl(store, kafkaTemplate, objectMapper, meter);
     }
 
     @PostConstruct

@@ -230,6 +230,7 @@ public class XCanaryAutoConfiguration {
         factory.setConsumerFactory(consumerFactory);
         factory.getContainerProperties().setConsumerRebalanceListener(rebalanceListener);
         factory.setRecordInterceptor(recordInterceptor);
+        factory.getContainerProperties().setObservationEnabled(true);
         return factory;
     }
 }

@@ -1,8 +1,11 @@
 package com.canary.audit.handler;
 
 import com.canary.audit.store.AuditEventStore;
+import com.canary.platform.lib.observability.CanaryMetrics;
+import com.canary.platform.lib.observability.CanaryRestateMeter;
 import com.canary.restate.audit.AuditEvent;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -26,7 +29,8 @@ class AuditQueryServiceImplTest {
     @BeforeEach
     void setUp() {
         store = new AuditEventStore();
-        handler = new AuditQueryServiceImpl(store, kafkaTemplate, objectMapper);
+        CanaryRestateMeter meter = new CanaryRestateMeter(new CanaryMetrics(new SimpleMeterRegistry(), "audit"));
+        handler = new AuditQueryServiceImpl(store, kafkaTemplate, objectMapper, meter);
     }
 
     @Test

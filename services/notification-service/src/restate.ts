@@ -1,5 +1,5 @@
 import * as restate from "@restatedev/restate-sdk";
-import { runWithCanary, applyXCanaryToRestateOptions } from "@canary/lib-node";
+import { runWithCanary, applyXCanaryToRestateOptions, measureRestate, type CanaryMetrics } from "@canary/lib-node";
 import {
   notificationServiceStableDef,
   notificationServiceCanaryDef,
@@ -14,6 +14,7 @@ import { randomUUID } from "node:crypto";
 export interface RestateSetupOptions {
   registerHandlers: boolean;
   port: number;
+  metrics?: CanaryMetrics;
 }
 
 export type KafkaSend = (topic: string, key: string, value: string) => Promise<void>;
@@ -22,6 +23,12 @@ let kafkaSend: KafkaSend | null = null;
 
 export function configureKafkaSend(fn: KafkaSend): void {
   kafkaSend = fn;
+}
+
+let metricsRef: CanaryMetrics | null = null;
+
+export function configureMetrics(m: CanaryMetrics): void {
+  metricsRef = m;
 }
 
 export const MY_VARIANT: "stable" | "canary" =
@@ -38,45 +45,50 @@ export async function notifyHandler(
   // Read x-canary from invocation metadata.
   // ctx.request().headers is a ReadonlyMap<string, string> in SDK 1.14.
   const isCanary = ctx.request().headers.get("x-canary") === "true";
+  const handlerName = `${notificationServiceDef.name}.notify`;
 
-  return runWithCanary(isCanary, async () => {
-    // Phase 3.a TerminalError driver preserved.
-    if (req.userId === "reject-me") {
-      throw new restate.TerminalError("notify rejected for test driver");
-    }
+  const body = async (): Promise<NotifyResult> => {
+    return runWithCanary(isCanary, async () => {
+      // Phase 3.a TerminalError driver preserved.
+      if (req.userId === "reject-me") {
+        throw new restate.TerminalError("notify rejected for test driver");
+      }
 
-    const id = randomUUID();
+      const id = randomUUID();
 
-    const deliveredMessage =
-      MY_VARIANT === "canary" ? `${req.message} [via canary notifier]` : req.message;
+      const deliveredMessage =
+        MY_VARIANT === "canary" ? `${req.message} [via canary notifier]` : req.message;
 
-    const stored: StoredNotification = { id, userId: req.userId, message: deliveredMessage, status: "sent" };
-    notificationStore.put(stored);
+      const stored: StoredNotification = { id, userId: req.userId, message: deliveredMessage, status: "sent" };
+      notificationStore.put(stored);
 
-    if (kafkaSend) {
-      await kafkaSend("notifications.events", id, JSON.stringify(stored));
-    }
+      if (kafkaSend) {
+        await kafkaSend("notifications.events", id, JSON.stringify(stored));
+      }
 
-    const auditEvent: AuditEvent = {
-      aggregate: "notification",
-      id,
-      action: "sent",
-      correlationId: req.orderId,
-    };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    // The Restate SDK's Client<M> type collapses (arg, opts?) to (opts?) for handlers that take one arg.
-    // At runtime optsFromArgs() correctly handles (parameter, Opts) — cast to bypass the type gap.
-    await (ctx.serviceClient(auditQueryServiceDef) as any).append(
-      auditEvent,
-      restate.rpc.opts(applyXCanaryToRestateOptions({})),
-    );
+      const auditEvent: AuditEvent = {
+        aggregate: "notification",
+        id,
+        action: "sent",
+        correlationId: req.orderId,
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // The Restate SDK's Client<M> type collapses (arg, opts?) to (opts?) for handlers that take one arg.
+      // At runtime optsFromArgs() correctly handles (parameter, Opts) — cast to bypass the type gap.
+      await (ctx.serviceClient(auditQueryServiceDef) as any).append(
+        auditEvent,
+        restate.rpc.opts(applyXCanaryToRestateOptions({})),
+      );
 
-    return {
-      delivered: true,
-      version: MY_VARIANT,
-      deliveredMessage,
-    };
-  });
+      return {
+        delivered: true,
+        version: MY_VARIANT,
+        deliveredMessage,
+      };
+    });
+  };
+
+  return metricsRef ? measureRestate(metricsRef, handlerName, body) : body();
 }
 
 export const notificationService = restate.service({
@@ -85,6 +97,9 @@ export const notificationService = restate.service({
 });
 
 export async function setupRestate(opts: RestateSetupOptions): Promise<void> {
+  if (opts.metrics) {
+    configureMetrics(opts.metrics);
+  }
   if (!opts.registerHandlers) {
     console.log("RESTATE_REGISTER_HANDLERS=false; skipping Restate endpoint listener");
     return;
